@@ -21,14 +21,8 @@ public class ReportActivity extends Activity {
     private static final int MODE_W = 110, COL_W = 118, ROW_H = 52;
 
     @Override
-    protected void attachBaseContext(Context base) {
-        super.attachBaseContext(UiScale.wrap(base));   // كل المقاسات أصغر بـ 30%
-    }
-
-    @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        UiScale.applyWindow(this);                      // النافذة 70% من الشاشة
         String path = getIntent().getStringExtra(EXTRA_FILE);
         TripSession s = path == null ? null : SessionStore.read(new File(path));
 

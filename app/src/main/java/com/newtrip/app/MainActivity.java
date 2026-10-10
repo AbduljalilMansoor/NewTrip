@@ -1,7 +1,6 @@
 package com.newtrip.app;
 
 import android.app.Activity;
-import android.content.Context;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -58,14 +57,8 @@ public class MainActivity extends Activity {
     private RingGauge gBattery, gFuel;
 
     @Override
-    protected void attachBaseContext(Context base) {
-        super.attachBaseContext(UiScale.wrap(base));   // كل المقاسات أصغر بـ 30%
-    }
-
-    @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        UiScale.applyWindow(this);                      // النافذة 70% من الشاشة
         Updater.init(this);
         store = new SessionStore(this);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);

@@ -67,7 +67,3 @@ adb shell pm grant com.newtrip.app android.car.permission.CAR_POWERTRAIN
 5. التحديث من داخل التطبيق يعمل تلقائياً: اسم المستودع (owner/repo) يُحقن وقت البناء من GitHub Actions، فلا تعديل يدوي. (لصفحة التثبيت فعّل Settings ← Pages ← Source: GitHub Actions؛ وبدونها يبقى بناء الـ APK والـ Release يعملان.)
 
 التطبيق مستقل تماماً: معرّفه `com.newtrip.app`، ويمكن تثبيته بجانب أي تطبيق آخر.
-
-
-## حجم النافذة
-New Trip يعمل كنافذة عائمة بحجم **70% من الشاشة** (في الوسط) وكل المقاسات داخلها أصغر بـ **30%** (الخطوط والعدادات والجداول…). لتغيير النسبة عدّل `FACTOR` في `UiScale.java` (1.0 = بلا تصغير).
