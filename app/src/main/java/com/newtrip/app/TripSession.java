@@ -16,6 +16,50 @@ public final class TripSession {
     public static final int GEAR_P = 1;
     public static final int EV = 0, ENG = 1;
 
+    /** شرائح السرعة للتحليل (Analyze). EV only = المحرك مطفأ بأي سرعة. */
+    public static final int T_LOW = 0, T_MED = 1, T_HIGH = 2, T_VHIGH = 3, T_EV = 4;
+    public static final int NUM_TIERS = 5;
+    public static final String[] TIER_NAMES = {"Low", "Med", "High", "Very High", "EV only"};
+    public static final String[] TIER_RANGES = {"Below 60", "Between 60 to 90", "Between 90 to 130", "Above 130", "Any"};
+
+    public static int tierOf(boolean engineOn, Float speedKmh) {
+        if (!engineOn) return T_EV;
+        float v = speedKmh == null ? 0f : speedKmh;
+        if (v < 60f) return T_LOW;
+        if (v < 90f) return T_MED;
+        if (v <= 130f) return T_HIGH;
+        return T_VHIGH;
+    }
+
+    /** تجميع شريحة سرعة داخل نمط قيادة: المدة والمسافة والوقود، ووقت Smart مقابل Forced. */
+    public static final class Tier {
+        public long durMs, smartMs, forcedMs;
+        public double distKm, fuelL;
+        public float targetMin = Float.NaN, targetMax = Float.NaN;   // Forced SOC target المرصود
+
+        void noteTarget(float t) {
+            if (Float.isNaN(t)) return;
+            if (Float.isNaN(targetMin) || t < targetMin) targetMin = t;
+            if (Float.isNaN(targetMax) || t > targetMax) targetMax = t;
+        }
+
+        JSONObject toJson() throws JSONException {
+            JSONObject o = new JSONObject();
+            o.put("dur", durMs).put("smart", smartMs).put("forced", forcedMs)
+             .put("dist", distKm).put("fuel", fuelL);
+            putF(o, "tMin", targetMin); putF(o, "tMax", targetMax);
+            return o;
+        }
+
+        static Tier fromJson(JSONObject o) {
+            Tier t = new Tier();
+            t.durMs = o.optLong("dur"); t.smartMs = o.optLong("smart"); t.forcedMs = o.optLong("forced");
+            t.distKm = o.optDouble("dist", 0); t.fuelL = o.optDouble("fuel", 0);
+            t.targetMin = getF(o, "tMin"); t.targetMax = getF(o, "tMax");
+            return t;
+        }
+    }
+
     public static final class Cell {
         public long durMs;
         public double distKm, kwhOut, kwhIn, fuelL, refuelPct;
@@ -52,6 +96,12 @@ public final class TripSession {
     public float socStart = Float.NaN, socEnd = Float.NaN, fuelStart = Float.NaN, fuelEnd = Float.NaN;
     public float odoStart = Float.NaN, odoEnd = Float.NaN;
     public final Cell[][] cells = new Cell[NUM_MODES][2];
+    /** [نمط القيادة][شريحة السرعة]. الرحلات القديمة (قبل Analyze) بلا بيانات: hasTiers = false. */
+    public final Tier[][] tiers = new Tier[NUM_MODES][NUM_TIERS];
+    public boolean hasTiers = true;
+    /** وضع توفير الطاقة اليدوي (يُستخدم إذا لم تتوفر إشارة من السيارة). */
+    public boolean manualForced;
+    public float manualTarget = Float.NaN;
 
     /** ملف الرحلة في السجل (لا يُحفظ، يُضبط عند القراءة). */
     public transient java.io.File file;
@@ -61,6 +111,7 @@ public final class TripSession {
 
     public TripSession() {
         for (int m = 0; m < NUM_MODES; m++) for (int k = 0; k < 2; k++) cells[m][k] = new Cell();
+        for (int m = 0; m < NUM_MODES; m++) for (int t = 0; t < NUM_TIERS; t++) tiers[m][t] = new Tier();
     }
 
     public static int bucket(Integer mode) {
@@ -103,13 +154,30 @@ public final class TripSession {
                     if (out >= 0) c.kwhOut += out * h;
                     else c.kwhIn += -out * h;
                 }
+                Tier t = tiers[bucketOf(l)][tierOf(l.engineOn, l.speedKmh)];
+                t.durMs += dt;
+                if (v != null) t.distKm += v * h;
+                if (isForced(l)) { t.forcedMs += dt; t.noteTarget(targetSoc(l)); }
+                else t.smartMs += dt;
             }
         }
         lastAdvance = now;
     }
 
     public synchronized void addFuel(double litres, Live l) {
-        if (active && litres > 0) cur(l).fuelL += litres;
+        if (!active || litres <= 0) return;
+        cur(l).fuelL += litres;
+        tiers[bucketOf(l)][tierOf(l.engineOn, l.speedKmh)].fuelL += litres;
+    }
+
+    /** Forced Power Saving؟ الإشارة من السيارة إن وُجدت، وإلا الاختيار اليدوي. */
+    public boolean isForced(Live l) {
+        return l.powerSaveForced != null ? l.powerSaveForced : manualForced;
+    }
+
+    /** هدف SOC في وضع Forced (NaN إن لم يُعرف). */
+    public float targetSoc(Live l) {
+        return l.forcedSocTarget != null ? l.forcedSocTarget : manualTarget;
     }
 
     /** يُستدعى كل ثانية لتسجيل البطارية والوقود والعداد. */
@@ -164,14 +232,76 @@ public final class TripSession {
         return all > 0.01 ? total(EV).distKm / all * 100.0 : 0;
     }
 
+    // ---------- معلومات الرحلة (تُسجَّل في التقرير) ----------
+    public synchronized long engineMs() { return total(ENG).durMs; }
+
+    /** Hybrid إذا اشتغل المحرك في أي لحظة من الرحلة، وإلا Electric. */
+    public synchronized String driveType() { return engineMs() > 0 ? "Hybrid" : "Electric"; }
+
+    public synchronized long smartMs() {
+        long x = 0;
+        for (Tier[] row : tiers) for (Tier t : row) x += t.smartMs;
+        return x;
+    }
+
+    public synchronized long forcedMs() {
+        long x = 0;
+        for (Tier[] row : tiers) for (Tier t : row) x += t.forcedMs;
+        return x;
+    }
+
+    /** Smart Power Save / Forced Power Saving / Mixed (إذا تغيّر الوضع أثناء الرحلة). */
+    public synchronized String socModeLabel() {
+        long sm = smartMs(), fo = forcedMs();
+        if (sm == 0 && fo == 0) return "—";
+        if (fo == 0) return "Smart Power Save";
+        if (sm == 0) return "Forced Power Saving";
+        return "Mixed";
+    }
+
+    /** Target SOC لوضع Forced، مثل "30%" أو "30–40%"، و"—" إن لم يوجد. */
+    public synchronized String targetLabel() {
+        float lo = Float.NaN, hi = Float.NaN;
+        for (Tier[] row : tiers) for (Tier t : row) {
+            if (!Float.isNaN(t.targetMin) && (Float.isNaN(lo) || t.targetMin < lo)) lo = t.targetMin;
+            if (!Float.isNaN(t.targetMax) && (Float.isNaN(hi) || t.targetMax > hi)) hi = t.targetMax;
+        }
+        return targetText(lo, hi);
+    }
+
+    public static String targetText(float lo, float hi) {
+        if (Float.isNaN(lo) || Float.isNaN(hi)) return "—";
+        if (Math.round(lo) == Math.round(hi)) return Math.round(lo) + "%";
+        return Math.round(lo) + "–" + Math.round(hi) + "%";
+    }
+
+    /** متوسط السرعة الكلي (كم/س) = المسافة ÷ المدة. */
+    public synchronized double avgSpeedKmh() {
+        long d = totalDurMs();
+        return d > 0 ? totalDistKm() / (d / 3_600_000.0) : Double.NaN;
+    }
+
     // ---------- JSON ----------
     public synchronized JSONObject toJson() throws JSONException {
         JSONObject o = new JSONObject();
-        o.put("v", 1).put("start", startWall).put("end", endWall).put("active", active).put("negIsIn", negIsIn);
+        o.put("v", 2).put("start", startWall).put("end", endWall).put("active", active).put("negIsIn", negIsIn);
         putF(o, "socStart", socStart); putF(o, "socEnd", socEnd);
         putF(o, "fuelStart", fuelStart); putF(o, "fuelEnd", fuelEnd);
         putF(o, "odoStart", odoStart); putF(o, "odoEnd", odoEnd);
         putF(o, "minFuel", minFuelPct);
+        // معلومات الرحلة المسجّلة (للقراءة السريعة من الملف)
+        o.put("hasTiers", hasTiers).put("mForced", manualForced);
+        putF(o, "mTarget", manualTarget);
+        o.put("driveType", driveType()).put("socMode", socModeLabel()).put("targetSoc", targetLabel());
+        double avg = avgSpeedKmh();
+        if (!Double.isNaN(avg)) o.put("avgKmh", Math.round(avg * 10) / 10.0);
+        JSONArray tr = new JSONArray();
+        for (int m = 0; m < NUM_MODES; m++) {
+            JSONArray row = new JSONArray();
+            for (int t = 0; t < NUM_TIERS; t++) row.put(tiers[m][t].toJson());
+            tr.put(row);
+        }
+        o.put("tiers", tr);
         JSONArray a = new JSONArray();
         for (int m = 0; m < NUM_MODES; m++) {
             JSONArray row = new JSONArray();
@@ -193,6 +323,17 @@ public final class TripSession {
         s.fuelStart = getF(o, "fuelStart"); s.fuelEnd = getF(o, "fuelEnd");
         s.odoStart = getF(o, "odoStart"); s.odoEnd = getF(o, "odoEnd");
         s.minFuelPct = getF(o, "minFuel");
+        s.manualForced = o.optBoolean("mForced");
+        s.manualTarget = getF(o, "mTarget");
+        JSONArray tr = o.optJSONArray("tiers");
+        s.hasTiers = tr != null;       // رحلة قديمة = بلا بيانات شرائح
+        if (tr != null) {
+            for (int m = 0; m < NUM_MODES && m < tr.length(); m++) {
+                JSONArray row = tr.getJSONArray(m);
+                for (int t = 0; t < NUM_TIERS && t < row.length(); t++)
+                    s.tiers[m][t] = Tier.fromJson(row.getJSONObject(t));
+            }
+        }
         JSONArray a = o.getJSONArray("cells");
         for (int m = 0; m < NUM_MODES && m < a.length(); m++) {
             JSONArray row = a.getJSONArray(m);

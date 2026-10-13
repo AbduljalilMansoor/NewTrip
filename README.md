@@ -67,3 +67,22 @@ adb shell pm grant com.newtrip.app android.car.permission.CAR_POWERTRAIN
 5. التحديث من داخل التطبيق يعمل تلقائياً: اسم المستودع (owner/repo) يُحقن وقت البناء من GitHub Actions، فلا تعديل يدوي. (لصفحة التثبيت فعّل Settings ← Pages ← Source: GitHub Actions؛ وبدونها يبقى بناء الـ APK والـ Release يعملان.)
 
 التطبيق مستقل تماماً: معرّفه `com.newtrip.app`، ويمكن تثبيته بجانب أي تطبيق آخر.
+
+
+## حجم النافذة
+New Trip يعمل كنافذة عائمة بحجم **70% من الشاشة** (في الوسط) وكل المقاسات داخلها أصغر بـ **30%** (الخطوط والعدادات والجداول…). لتغيير النسبة عدّل `FACTOR` في `UiScale.java` (1.0 = بلا تصغير).
+
+
+---
+
+## التحسينات الأخيرة
+
+**المدى الكهربائي:** أقصى مدى للبطارية 100 كم، فالمدى = نسبة الشحن × 100 (`Live.EV_MAX_RANGE_KM`). قيمة السيارة الخام (CLTC) تظهر في التشخيص فقط.
+
+**العداد:** `CombinedGauge` بتصميم لوحة الهجين: قوس البطارية (أزرق) يسار، الوقود (برتقالي) يمين، والمدى الكلي في الوسط مع «EV Range» و«HV Fuel Range». ثابت `MainActivity.CLUSTER_RANGE_IS_TOTAL` يحدد هل مدى شاشة العدادات كلي (الافتراضي) أم للبنزين فقط.
+
+**ما يُسجَّل في كل رحلة:** Mode (Hybrid / Electric)، SOC mode (Smart Power Save / Forced Power Saving / Mixed)، Target SOC، متوسط السرعة. وتُسجَّل أيضاً شرائح السرعة لكل نمط قيادة للتحليل.
+- Hybrid إذا اشتغل المحرك في أي لحظة، وإلا Electric.
+- SOC mode والهدف: إشارة السيارة إن عُرفت (`CarBridge.POWER_SAVE_SIGNALS` و`TARGET_SOC_SIGNALS`)، وإلا الاختيار اليدوي بالضغط على شارة 🔋 (في شاشة البداية وأثناء الرحلة). لمعرفة أسماء الإشارات: ⚙ تشخيص ← «إشارات SOC».
+
+**Analyze (📊):** اختر رحلة أو أكثر ثم Mode (Park / Eco / Normal / Sport / Others / ALL) فيظهر جدول: Low <60، Med 60–90، High 90–130، Very High >130، EV only (المحرك مطفأ)، Total. الأعمدة: Avg speed، Duration، Distance، Fuel، L/100Km، Forced SOC target، SOC Time % (Smart / Forced). رأس الجدول: مستوى البطارية @start و@end (رحلة واحدة) أو المتوسط (عدة رحلات). الرحلات المسجلة قبل هذا التحديث لا تحتوي شرائح سرعة فلا تُحسب.

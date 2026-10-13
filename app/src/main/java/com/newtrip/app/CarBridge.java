@@ -38,6 +38,16 @@ public final class CarBridge {
             "VEHICLESPEEDVSOSIG_48A", "ENGINESPEED_4B2", "BMS_44_PACKPOWERREALTIME_53D",
             "FUELROLLINGCOUNTER_4B2", "HCU_DRIVEMODE_JT_522"};
 
+    /**
+     * أسماء إشارات وضع توفير الطاقة وهدف SOC. غير معروفة لهذا الطراز بعد، فالقوائم فارغة عمداً.
+     * بعد تشغيل «تشخيص ← إشارات SOC» أضف الأسماء الصحيحة هنا (مثال: "getXXX_SOCMODE").
+     * إلى أن تُضاف يستخدم التطبيق الاختيار اليدوي (Smart / Forced + الهدف).
+     * POWER_SAVE_FORCED_VALUE = القيمة التي تعني Forced Power Saving.
+     */
+    static final String[] POWER_SAVE_SIGNALS = {};
+    static final String[] TARGET_SOC_SIGNALS = {};
+    static final int POWER_SAVE_FORCED_VALUE = 1;
+
     public interface Callback {
         /** يُستدعى قبل تغيّر أي قيمة، لكي تُحسب الفترة الماضية بالقيم القديمة. */
         void beforeChange(long now);
@@ -308,11 +318,46 @@ public final class CarBridge {
         if (odo == null) odo = range(vf(PERF_ODOMETER), 0.1f, 2_000_000);
         live.odometerKm = odo;
 
-        live.evRangeKm = range(al("getVCU_CLTC_RANGEAVAL"), 0, 2000);
+        // المدى الكهربائي الحقيقي: أقصى مدى للبطارية 100 كم، فالمدى = نسبة الشحن × 100 كم.
+        // قيمة السيارة (CLTC) أكبر من الواقع فنحتفظ بها للتشخيص فقط.
+        live.evRangeRawKm = range(al("getVCU_CLTC_RANGEAVAL"), 0, 2000);
+        live.evRangeKm = soc == null ? null : soc * Live.EV_MAX_RANGE_KM / 100f;
+
+        Float ps = firstOf(POWER_SAVE_SIGNALS);
+        live.powerSaveForced = ps == null ? null : ps.intValue() == POWER_SAVE_FORCED_VALUE;
+        Float tg = range(firstOf(TARGET_SOC_SIGNALS), 0, 100);
+        live.forcedSocTarget = tg;
         live.rangeKm = clusterRangeKm();
 
         Float g = al("getVCU_1_G_PRNDGEARACT");
         live.gear = g == null ? null : g.intValue();
+    }
+
+    private Float firstOf(String[] names) {
+        for (String n : names) { Float v = al(n); if (v != null) return v; }
+        return null;
+    }
+
+    /** للتشخيص: كل قراءات Autolink التي يبدو اسمها متعلقاً بالبطارية/وضع التوفير، مع قيمتها الآن. */
+    public String dumpSocSignals() {
+        Object car = al;
+        if (car == null) return "Autolink غير متصل";
+        StringBuilder sb = new StringBuilder();
+        java.util.TreeSet<String> names = new java.util.TreeSet<>();
+        for (Method m : car.getClass().getMethods()) {
+            String n = m.getName();
+            if (m.getParameterTypes().length != 0 || !n.startsWith("get")) continue;
+            String u = n.toUpperCase(java.util.Locale.ROOT);
+            if (u.contains("SOC") || u.contains("SAVE") || u.contains("HEV") || u.contains("CHRG")
+                    || u.contains("CHARG") || u.contains("DRIVEMODE") || u.contains("EVMODE")) names.add(n);
+        }
+        int count = 0;
+        for (String n : names) {
+            if (++count > 60) { sb.append("…\n"); break; }
+            Float v = al(n);
+            sb.append(n).append(" = ").append(v).append('\n');
+        }
+        return names.isEmpty() ? "لا توجد إشارات مطابقة" : sb.toString();
     }
 
     // ================= أدوات =================

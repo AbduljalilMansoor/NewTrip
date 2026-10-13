@@ -3,6 +3,7 @@ package com.newtrip.app;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.Intent;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
@@ -21,8 +22,14 @@ public class ReportActivity extends Activity {
     private static final int MODE_W = 110, COL_W = 118, ROW_H = 52;
 
     @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(UiScale.wrap(base));   // كل المقاسات أصغر بـ 30%
+    }
+
+    @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        UiScale.applyWindow(this);                      // النافذة 70% من الشاشة
         String path = getIntent().getStringExtra(EXTRA_FILE);
         TripSession s = path == null ? null : SessionStore.read(new File(path));
 
@@ -39,7 +46,15 @@ public class ReportActivity extends Activity {
         back.setPadding(0, 0, p, 0);
         back.setOnClickListener(v -> finish());
         header.addView(back);
-        header.addView(Ui.text(this, "New Trip Stats", 28, Ui.TEXT, true));
+        header.addView(Ui.text(this, "New Trip Stats", 28, Ui.TEXT, true), new LinearLayout.LayoutParams(0, -2, 1f));
+        if (s != null) {
+            final String f = path;
+            TextView an = Ui.button(this, "📊  Analyze", Ui.EV, v -> startActivity(
+                    new Intent(this, AnalyzeActivity.class).putExtra(AnalyzeActivity.EXTRA_FILES, new String[]{f})));
+            an.setTextSize(16);
+            an.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 8));
+            header.addView(an);
+        }
         root.addView(header);
 
         if (s == null) {
@@ -54,6 +69,7 @@ public class ReportActivity extends Activity {
 
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
+        body.addView(tripInfo(s));
         body.addView(summary(s));
         body.addView(dashboard(s));
         TextView hint = Ui.text(this, "اضغط على أي نمط لعرض تفاصيله", 14, Ui.MUTED, false);
@@ -74,6 +90,18 @@ public class ReportActivity extends Activity {
         sv.addView(body);
         root.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1f));
         setContentView(root);
+    }
+
+    // ---------------- معلومات الرحلة المسجّلة ----------------
+    private View tripInfo(TripSession s) {
+        LinearLayout r = Ui.row(this);
+        Ui.tile(r, "Mode", Ui.TEXT).setText(s.driveType());
+        TextView soc = Ui.tile(r, "SOC mode", Ui.TEXT);
+        soc.setTextSize(20);
+        soc.setText(s.socModeLabel());
+        Ui.tile(r, "Target SOC", Ui.TEXT).setText(s.targetLabel());
+        Ui.tile(r, "Average speed", Ui.TEXT).setText(Ui.num(s.avgSpeedKmh(), 0) + " km/h");
+        return r;
     }
 
     // ---------------- الملخص ----------------

@@ -11,8 +11,14 @@ public final class Live {
     public volatile Float fuelLitres;
     public volatile Float odometerKm;
     public volatile Integer gear;
-    public volatile Float evRangeKm;     // المدى الكهربائي (VCU_CLTC_RANGEAVAL)
+    public volatile Float evRangeKm;     // المدى الكهربائي = SOC × 100 كم (أقصى مدى للبطارية 100 كم)
+    public volatile Float evRangeRawKm;  // القيمة الخام من السيارة (VCU_CLTC_RANGEAVAL) للتشخيص فقط
+    public volatile Boolean powerSaveForced; // true = Forced Power Saving، false = Smart، null = الإشارة غير متوفرة
+    public volatile Float forcedSocTarget;   // هدف SOC في وضع Forced إن توفرت الإشارة
     public volatile Float rangeKm;       // المدى في شاشة العدادات (MCU_PERIOD_TCDTE)
+
+    /** أقصى مدى كهربائي للبطارية بالكيلومتر (عند 100%). */
+    public static final float EV_MAX_RANGE_KM = 100f;
 
     public volatile boolean engineOn;
     public volatile float fuelFlowLph = Float.NaN;

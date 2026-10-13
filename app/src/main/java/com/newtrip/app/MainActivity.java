@@ -1,6 +1,7 @@
 package com.newtrip.app;
 
 import android.app.Activity;
+import android.content.Context;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -31,6 +32,10 @@ import java.util.Locale;
 public class MainActivity extends Activity {
     static final String PREFS = "newtrip";
     static final String PREF_NEG_IS_IN = "neg_is_in";
+    static final String PREF_FORCED = "soc_forced";
+    static final String PREF_TARGET = "soc_target";
+    /** true = المدى في شاشة العدادات (MCU_PERIOD_TCDTE) هو المدى الكلي (كهرباء + بنزين)؛ false = مدى البنزين فقط. */
+    static final boolean CLUSTER_RANGE_IS_TOTAL = true;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private SessionStore store;
@@ -53,12 +58,19 @@ public class MainActivity extends Activity {
     private final TextView[][] vVals = new TextView[TripSession.NUM_MODES][2];
     private final LinearLayout[][] vRows = new LinearLayout[TripSession.NUM_MODES][2];
     // عناصر شاشة البداية
-    private TextView pStatus, pMode, pKind, pEvRange, pRange;
-    private RingGauge gBattery, gFuel;
+    private TextView pStatus, pMode, pKind, pSoc;
+    private CombinedGauge gauge;
+    private TextView vSoc;
+
+    @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(UiScale.wrap(base));   // كل المقاسات أصغر بـ 30%
+    }
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        UiScale.applyWindow(this);                      // النافذة 70% من الشاشة
         Updater.init(this);
         store = new SessionStore(this);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
@@ -246,19 +258,21 @@ public class MainActivity extends Activity {
         chips.addView(pKind, clp);
         p.addView(chips);
 
-        LinearLayout gauges = Ui.row(this);
-        gauges.setGravity(Gravity.CENTER);
-        gauges.setBaselineAligned(false);
-        gBattery = new RingGauge(this, "البطارية", Ui.EV);
-        gFuel = new RingGauge(this, "الوقود", Ui.ENG);
-        gFuel.setLowWarning(15);
-        pEvRange = Ui.text(this, " ", 16, Ui.MUTED, false);
-        pRange = Ui.text(this, " ", 16, Ui.MUTED, false);
-        gauges.addView(gaugeColumn(gBattery, pEvRange), new LinearLayout.LayoutParams(0, -2, 1f));
-        gauges.addView(gaugeColumn(gFuel, pRange), new LinearLayout.LayoutParams(0, -2, 1f));
+        // وضع توفير الطاقة (يُسجَّل في كل رحلة): Smart Power Save أو Forced + الهدف
+        pSoc = Ui.text(this, socText(), 16, Ui.TEXT, true);
+        pSoc.setGravity(Gravity.CENTER);
+        pSoc.setBackground(Ui.round(Ui.CARD2, Ui.dp(this, 10)));
+        pSoc.setPadding(Ui.dp(this, 14), Ui.dp(this, 8), Ui.dp(this, 14), Ui.dp(this, 8));
+        pSoc.setOnClickListener(v -> chooseSocMode(null));
+        LinearLayout.LayoutParams plp2 = new LinearLayout.LayoutParams(-2, -2);
+        plp2.topMargin = Ui.dp(this, 10);
+        plp2.gravity = Gravity.CENTER_HORIZONTAL;
+        p.addView(pSoc, plp2);
+
+        gauge = new CombinedGauge(this);
         LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(-1, 0, 1f);
-        glp.topMargin = Ui.dp(this, 12);
-        p.addView(gauges, glp);
+        glp.topMargin = Ui.dp(this, 8);
+        p.addView(gauge, glp);
 
         TextView start = Ui.button(this, "▶   START", Ui.GOOD, v -> startTrip());
         start.setTextSize(28);
@@ -275,15 +289,61 @@ public class MainActivity extends Activity {
         return p;
     }
 
-    private View gaugeColumn(RingGauge g, TextView under) {
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        col.setGravity(Gravity.CENTER_HORIZONTAL);
-        int size = Ui.dp(this, 230);
-        col.addView(g, new LinearLayout.LayoutParams(size, size));
-        under.setGravity(Gravity.CENTER);
-        col.addView(under);
-        return col;
+    // ======================= وضع توفير الطاقة (SOC mode) =======================
+    private boolean prefForced() { return prefs.getBoolean(PREF_FORCED, false); }
+    private float prefTarget() { return prefs.getFloat(PREF_TARGET, Float.NaN); }
+
+    private String socText() {
+        String t = TripSession.targetText(prefTarget(), prefTarget());
+        return prefForced() ? "🔋 Forced Power Saving · " + t : "🔋 Smart Power Save";
+    }
+
+    /** نافذة اختيار وضع توفير الطاقة والهدف. s = الرحلة الجارية (أو null قبل البدء). */
+    private void chooseSocMode(TripSession s) {
+        final String[] modes = {"Smart Power Save", "Forced Power Saving"};
+        new AlertDialog.Builder(this)
+                .setTitle("SOC mode")
+                .setSingleChoiceItems(modes, prefForced() ? 1 : 0, (d, which) -> {
+                    d.dismiss();
+                    if (which == 0) applySocMode(false, Float.NaN);
+                    else chooseTarget();
+                })
+                .setNegativeButton("إلغاء", null)
+                .show();
+    }
+
+    private void chooseTarget() {
+        final int[] vals = {20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80};
+        String[] labels = new String[vals.length];
+        int sel = 2;
+        for (int i = 0; i < vals.length; i++) {
+            labels[i] = vals[i] + "%";
+            if (!Float.isNaN(prefTarget()) && Math.round(prefTarget()) == vals[i]) sel = i;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Target SOC")
+                .setSingleChoiceItems(labels, sel, (d, which) -> { d.dismiss(); applySocMode(true, vals[which]); })
+                .setNegativeButton("إلغاء", null)
+                .show();
+    }
+
+    private void applySocMode(boolean forced, float target) {
+        prefs.edit().putBoolean(PREF_FORCED, forced).putFloat(PREF_TARGET, target).apply();
+        TripService svc = TripService.instance;
+        if (svc != null && svc.session() != null) {      // تغيير أثناء الرحلة يسري من هذه اللحظة
+            svc.session().manualForced = forced;
+            svc.session().manualTarget = target;
+        }
+        if (pSoc != null) pSoc.setText(socText());
+        if (vSoc != null) vSoc.setText(socText());
+    }
+
+    /** مدى البنزين: من مدى شاشة العدادات (ناقصاً مدى الكهرباء إذا كان كلياً). */
+    private static Float fuelRangeKm(Live l) {
+        if (l.rangeKm == null) return null;
+        if (!CLUSTER_RANGE_IS_TOTAL) return l.rangeKm;
+        float ev = l.evRangeKm == null ? 0f : l.evRangeKm;
+        return Math.max(0f, l.rangeKm - ev);
     }
 
     /** يعزل رقماً بوحدته (مثل "90 km") داخل نص عربي حتى لا ينقلب ترتيبه. */
@@ -310,7 +370,17 @@ public class MainActivity extends Activity {
         }
         LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(-1, -2);
         hlp.topMargin = Ui.dp(this, trips.isEmpty() ? 0 : 18);
-        list.addView(Ui.text(this, "الرحلات السابقة", 20, Ui.TEXT, true), hlp);
+        LinearLayout prevRow = Ui.row(this);
+        prevRow.setGravity(Gravity.CENTER_VERTICAL);
+        prevRow.addView(Ui.text(this, "الرحلات السابقة", 20, Ui.TEXT, true), new LinearLayout.LayoutParams(0, -2, 1f));
+        if (!trips.isEmpty()) {
+            TextView analyze = Ui.button(this, "📊  Analyze", Ui.EV, v ->
+                    startActivity(new Intent(this, AnalyzeActivity.class)));
+            analyze.setTextSize(16);
+            analyze.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 8));
+            prevRow.addView(analyze);
+        }
+        list.addView(prevRow, hlp);
         if (trips.isEmpty()) {
             TextView e = Ui.text(this, "لا توجد رحلات بعد. اضغط START لتبدأ أول رحلة.", 16, Ui.MUTED, false);
             e.setPadding(0, Ui.dp(this, 12), 0, 0);
@@ -387,6 +457,10 @@ public class MainActivity extends Activity {
                 Ui.num(s.evShare(), 0), Ui.num(s.totalKwhOut(), 2), Ui.num(s.totalFuelL(), 2),
                 Ui.dur(s.totalDurMs())), 15, Ui.MUTED, false));
 
+        c.addView(Ui.text(this, ltr(s.driveType() + "  ·  " + s.socModeLabel()
+                + ("—".equals(s.targetLabel()) ? "" : "  ·  " + s.targetLabel())
+                + "  ·  " + Ui.num(s.avgSpeedKmh(), 0) + " km/h"), 14, Ui.MUTED, false));
+
         File f = s.file;
         c.setOnClickListener(v -> openReport(f));
         c.setOnLongClickListener(v -> { confirmDelete(f, s); return true; });
@@ -422,10 +496,7 @@ public class MainActivity extends Activity {
         pMode.setText(Live.modeName(l.driveMode));
         pKind.setText(l.engineOn ? "⛽ محرك" : "⚡ كهرباء");
         pKind.setBackground(Ui.round(l.engineOn ? Ui.ENG : Ui.EV, Ui.dp(this, 10)));
-        gBattery.setValue(l.socPct);
-        gFuel.setValue(l.fuelPct);
-        pEvRange.setText(l.evRangeKm == null ? " " : "مدى كهربائي  " + ltr("~" + Math.round(l.evRangeKm) + " km"));
-        pRange.setText(l.rangeKm == null ? " " : "المدى  " + ltr("~" + Math.round(l.rangeKm) + " km"));
+        gauge.setValues(l.socPct, l.fuelPct, l.evRangeKm, fuelRangeKm(l));
         pStatus.setText("الاتصال: " + l.source);
     }
 
@@ -458,6 +529,8 @@ public class MainActivity extends Activity {
         s.active = true;
         s.startWall = System.currentTimeMillis();
         s.negIsIn = prefs.getBoolean(PREF_NEG_IS_IN, true);
+        s.manualForced = prefForced();
+        s.manualTarget = prefTarget();
         store.saveActive(s);
         TripService.start(this);
         render();
@@ -478,6 +551,12 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-2, -2);
         slp.setMarginStart(Ui.dp(this, 10));
         top.addView(vSource, slp);
+        vSoc = pill(socText(), Ui.CARD2, Ui.TEXT);
+        vSoc.setTextSize(15);
+        vSoc.setOnClickListener(x -> chooseSocMode(null));
+        LinearLayout.LayoutParams soclp = new LinearLayout.LayoutParams(-2, -2);
+        soclp.setMarginStart(Ui.dp(this, 10));
+        top.addView(vSoc, soclp);
         vStart = Ui.text(this, "", 15, Ui.MUTED, false);
         vStart.setPadding(Ui.dp(this, 16), 0, 0, 0);
         top.addView(vStart, new LinearLayout.LayoutParams(0, -2, 1f));
@@ -586,6 +665,8 @@ public class MainActivity extends Activity {
         vMode.setBackground(Ui.round(parked ? 0xFF1565C0 : modeColor(l.driveMode), Ui.dp(this, 10)));
         vSource.setText(l.engineOn ? "⛽ ENGINE" : "⚡ EV");
         vSource.setBackground(Ui.round(l.engineOn ? 0xFF8A5A00 : 0xFF0D5C8C, Ui.dp(this, 10)));
+        boolean forced = s.isForced(l);
+        vSoc.setText(forced ? "🔋 Forced · " + TripSession.targetText(s.targetSoc(l), s.targetSoc(l)) : "🔋 Smart Power Save");
         vElapsed.setText(Ui.clock(System.currentTimeMillis() - s.startWall));
         vStart.setText("بدأت " + Ui.date(s.startWall));
 
@@ -697,8 +778,11 @@ public class MainActivity extends Activity {
               .append("الوقود %: ").append(l.fuelPct).append("  لتر: ").append(l.fuelLitres).append('\n')
               .append("العداد كم: ").append(l.odometerKm).append('\n')
               .append("القير: ").append(l.gear).append('\n')
-              .append("المدى الكهربائي كم: ").append(l.evRangeKm).append('\n')
-              .append("مدى العدادات كم: ").append(l.rangeKm).append('\n');
+              .append("المدى الكهربائي كم (SOC × 100): ").append(l.evRangeKm)
+              .append("   [خام السيارة: ").append(l.evRangeRawKm).append("]").append('\n')
+              .append("مدى العدادات كم: ").append(l.rangeKm).append('\n')
+              .append("وضع التوفير من السيارة: ").append(l.powerSaveForced == null ? "غير متوفر (يدوي)" : l.powerSaveForced ? "Forced" : "Smart")
+              .append("   الهدف: ").append(l.forcedSocTarget).append('\n');
         }
         boolean neg = prefs.getBoolean(PREF_NEG_IS_IN, true);
         sb.append("\nاتجاه قدرة البطارية: ").append(neg ? "السالب = شحن (افتراضي)" : "الموجب = شحن (معكوس)")
@@ -708,6 +792,13 @@ public class MainActivity extends Activity {
                 .setTitle("تشخيص")
                 .setMessage(sb.toString())
                 .setPositiveButton("إغلاق", null)
+                .setNegativeButton("إشارات SOC", (d, w) -> {
+                    CarBridge b = svc != null ? null : preview;
+                    String dump = svc != null ? "أثناء الرحلة: افتح التشخيص من الشاشة الرئيسية بعد إنهائها."
+                            : (b == null ? "لا يوجد اتصال" : b.dumpSocSignals());
+                    new AlertDialog.Builder(this).setTitle("إشارات SOC / وضع التوفير")
+                            .setMessage(dump).setPositiveButton("إغلاق", null).show();
+                })
                 .setNeutralButton("عكس اتجاه البطارية", (d, w) -> {
                     boolean nv = !prefs.getBoolean(PREF_NEG_IS_IN, true);
                     prefs.edit().putBoolean(PREF_NEG_IS_IN, nv).apply();
