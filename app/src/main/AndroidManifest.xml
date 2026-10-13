@@ -37,6 +37,8 @@
 
         <activity android:name=".AnalyzeActivity" android:exported="false" android:theme="@style/FloatingTheme"/>
 
+        <activity android:name=".DashboardActivity" android:exported="false" android:theme="@style/FloatingTheme"/>
+
         <service android:name=".TripService" android:exported="false"/>
 
         <receiver android:name=".InstallReceiver" android:exported="false"/>

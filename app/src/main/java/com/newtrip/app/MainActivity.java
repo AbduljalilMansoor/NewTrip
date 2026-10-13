@@ -34,8 +34,8 @@ public class MainActivity extends Activity {
     static final String PREF_NEG_IS_IN = "neg_is_in";
     static final String PREF_FORCED = "soc_forced";
     static final String PREF_TARGET = "soc_target";
-    /** true = المدى في شاشة العدادات (MCU_PERIOD_TCDTE) هو المدى الكلي (كهرباء + بنزين)؛ false = مدى البنزين فقط. */
-    static final boolean CLUSTER_RANGE_IS_TOTAL = true;
+    /** مدى شاشة العدادات (MCU_PERIOD_TCDTE) هو مدى البنزين فقط، وليس المدى الكلي. */
+    static final boolean CLUSTER_RANGE_IS_TOTAL = false;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private SessionStore store;
@@ -64,16 +64,17 @@ public class MainActivity extends Activity {
 
     @Override
     protected void attachBaseContext(Context base) {
-        super.attachBaseContext(UiScale.wrap(base));   // كل المقاسات أصغر بـ 30%
+        super.attachBaseContext(UiScale.wrap(base));   // مقاس المحتوى من UiScale
     }
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        UiScale.applyWindow(this);                      // النافذة 70% من الشاشة
+        UiScale.applyWindow(this);                      // النافذة شبه كاملة (UiScale)
         Updater.init(this);
         store = new SessionStore(this);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        CarBridge.loadCalibration(this);
         requestNeededPermissions();
 
         LinearLayout root = new LinearLayout(this);
@@ -236,8 +237,8 @@ public class MainActivity extends Activity {
         LinearLayout wrap = Ui.row(this);
         List<TripSession> trips = loadTrips();
 
-        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(0, -1, 1.25f);
-        rlp.setMarginStart(Ui.dp(this, 16));
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(0, -1, 1.1f);
+        rlp.setMarginStart(Ui.dp(this, 20));
         wrap.addView(buildTripsPanel(trips), rlp);
         wrap.addView(buildStartPanel(), new LinearLayout.LayoutParams(0, -1, 1f));
         return wrap;
@@ -275,8 +276,8 @@ public class MainActivity extends Activity {
         p.addView(gauge, glp);
 
         TextView start = Ui.button(this, "▶   START", Ui.GOOD, v -> startTrip());
-        start.setTextSize(28);
-        int pad = Ui.dp(this, 24);
+        start.setTextSize(34);
+        int pad = Ui.dp(this, 30);
         start.setPadding(pad, pad, pad, pad);
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, -2);
         slp.topMargin = Ui.dp(this, 16);
@@ -298,18 +299,44 @@ public class MainActivity extends Activity {
         return prefForced() ? "🔋 Forced Power Saving · " + t : "🔋 Smart Power Save";
     }
 
-    /** نافذة اختيار وضع توفير الطاقة والهدف. s = الرحلة الجارية (أو null قبل البدء). */
+    /** نافذة وضع توفير الطاقة: اختيار يدوي، أو معايرة القراءة من السيارة (HCU_SOCMANAGEFED). */
     private void chooseSocMode(TripSession s) {
-        final String[] modes = {"Smart Power Save", "Forced Power Saving"};
+        TripService svc = TripService.instance;
+        Live l = svc != null ? svc.live() : preview != null ? preview.live : null;
+        String raw = l == null || l.socMgrRaw == null ? "—" : String.valueOf(l.socMgrRaw);
+        String tgt = l == null || l.socFedRaw == null ? "—" : String.valueOf(l.socFedRaw);
+        boolean calibrated = CarBridge.socMgrForcedRaw != null || CarBridge.socMgrSmartRaw != null;
+        final String[] items = {
+                "Smart Power Save (manual)",
+                "Forced Power Saving (manual)",
+                "Calibrate: the car is NOW in Smart",
+                "Calibrate: the car is NOW in Forced",
+                "Clear calibration (use manual)"};
         new AlertDialog.Builder(this)
-                .setTitle("SOC mode")
-                .setSingleChoiceItems(modes, prefForced() ? 1 : 0, (d, which) -> {
-                    d.dismiss();
+                .setTitle("SOC mode   [car socMgr=" + raw + "  target=" + tgt + (calibrated ? "  ✓ auto" : "  manual") + "]")
+                .setItems(items, (d, which) -> {
                     if (which == 0) applySocMode(false, Float.NaN);
-                    else chooseTarget();
+                    else if (which == 1) chooseTarget();
+                    else if (which == 4) calibrate(null, null, true);
+                    else if (l == null || l.socMgrRaw == null)
+                        android.widget.Toast.makeText(this, "No reading from the car yet", android.widget.Toast.LENGTH_LONG).show();
+                    else if (which == 2) calibrate(null, l.socMgrRaw, false);
+                    else calibrate(l.socMgrRaw, null, false);
                 })
                 .setNegativeButton("إلغاء", null)
                 .show();
+    }
+
+    /** يحفظ القيمة الخام التي تعني Forced أو Smart فتصبح القراءة تلقائية في كل الرحلات. */
+    private void calibrate(Integer forcedRaw, Integer smartRaw, boolean clear) {
+        SharedPreferences.Editor e = prefs.edit();
+        if (clear) e.remove("socmgr_forced").remove("socmgr_smart");
+        if (forcedRaw != null) e.putInt("socmgr_forced", forcedRaw);
+        if (smartRaw != null) e.putInt("socmgr_smart", smartRaw);
+        e.apply();
+        CarBridge.loadCalibration(this);
+        android.widget.Toast.makeText(this, clear ? "Calibration cleared" : "Saved. SOC mode is now read from the car.",
+                android.widget.Toast.LENGTH_LONG).show();
     }
 
     private void chooseTarget() {
@@ -378,7 +405,14 @@ public class MainActivity extends Activity {
                     startActivity(new Intent(this, AnalyzeActivity.class)));
             analyze.setTextSize(16);
             analyze.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 8));
+            TextView dashBtn = Ui.button(this, "📈  Dashboard", Ui.EV, v ->
+                    startActivity(new Intent(this, DashboardActivity.class)));
+            dashBtn.setTextSize(16);
+            dashBtn.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 8));
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, -2);
+            dlp.setMarginStart(Ui.dp(this, 10));
             prevRow.addView(analyze);
+            prevRow.addView(dashBtn, dlp);
         }
         list.addView(prevRow, hlp);
         if (trips.isEmpty()) {
@@ -781,8 +815,13 @@ public class MainActivity extends Activity {
               .append("المدى الكهربائي كم (SOC × 100): ").append(l.evRangeKm)
               .append("   [خام السيارة: ").append(l.evRangeRawKm).append("]").append('\n')
               .append("مدى العدادات كم: ").append(l.rangeKm).append('\n')
-              .append("وضع التوفير من السيارة: ").append(l.powerSaveForced == null ? "غير متوفر (يدوي)" : l.powerSaveForced ? "Forced" : "Smart")
-              .append("   الهدف: ").append(l.forcedSocTarget).append('\n');
+              .append("وضع التوفير من السيارة: ").append(l.powerSaveForced == null ? "غير معاير (يدوي)" : l.powerSaveForced ? "Forced" : "Smart")
+              .append("   [socMgr=").append(l.socMgrRaw).append("  socFed=").append(l.socFedRaw).append("]")
+              .append("   الهدف: ").append(l.forcedSocTarget).append('\n')
+              .append("HEV/EV (POWERMODEFED): ").append(l.hevMode == null ? null : l.hevMode == 1 ? "EV" : l.hevMode == 2 ? "HEV" : "M" + l.hevMode).append('\n')
+              .append("حرارة الخارج/المقصورة/البطارية: ").append(l.outsideTempC).append(" / ").append(l.cabinTempC).append(" / ").append(l.packTempMaxC).append('\n')
+              .append("A/C: ").append(l.acOn).append("   Regen: ").append(l.regenLevel)
+              .append("   متوسط السيارة: ").append(l.carAvgFuel).append(" L/100 , ").append(l.carAvgEnergy).append(" kWh/100").append('\n');
         }
         boolean neg = prefs.getBoolean(PREF_NEG_IS_IN, true);
         sb.append("\nاتجاه قدرة البطارية: ").append(neg ? "السالب = شحن (افتراضي)" : "الموجب = شحن (معكوس)")

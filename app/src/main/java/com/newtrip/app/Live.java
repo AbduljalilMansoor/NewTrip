@@ -15,6 +15,17 @@ public final class Live {
     public volatile Float evRangeRawKm;  // القيمة الخام من السيارة (VCU_CLTC_RANGEAVAL) للتشخيص فقط
     public volatile Boolean powerSaveForced; // true = Forced Power Saving، false = Smart، null = الإشارة غير متوفرة
     public volatile Float forcedSocTarget;   // هدف SOC في وضع Forced إن توفرت الإشارة
+    // قراءات إضافية (من Display Mirror): تُسجَّل في نوافذ الرحلة للوحة التحليل
+    public volatile Integer hevMode;       // HCU_POWERMODEFED: 1 = EV ، 2 = HEV
+    public volatile Integer socMgrRaw;     // HCU_SOCMANAGEFED الخام (معنى القيم يُعايَر من التطبيق)
+    public volatile Integer socFedRaw;     // HCU_SETSOCFED الخام (هدف SOC %)
+    public volatile Float outsideTempC;    // EXTERNALTEMPERATURE_C
+    public volatile Float cabinTempC;      // TMS_INCARTEMP
+    public volatile Float packTempMaxC;    // BMS_TBOXHVBATTMAXT
+    public volatile Integer acOn;          // TMS_ACREQUESTDISPLAYSTS
+    public volatile Integer regenLevel;    // HCU_EGYREGENLEVEL
+    public volatile Float carAvgFuel;      // HCU_4_G_AVGFUCNS (لتر/100كم من السيارة)
+    public volatile Float carAvgEnergy;    // HCU_4_G_AVGENERGYCNS (كيلوواط ساعة/100كم من السيارة)
     public volatile Float rangeKm;       // المدى في شاشة العدادات (MCU_PERIOD_TCDTE)
 
     /** أقصى مدى كهربائي للبطارية بالكيلومتر (عند 100%). */

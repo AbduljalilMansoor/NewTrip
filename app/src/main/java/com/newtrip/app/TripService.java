@@ -44,6 +44,7 @@ public class TripService extends Service implements CarBridge.Callback {
     @Override
     public void onCreate() {
         super.onCreate();
+        CarBridge.loadCalibration(this);
         instance = this;
         NotificationManager nm = getSystemService(NotificationManager.class);
         nm.createNotificationChannel(new NotificationChannel(CH, "New Trip", NotificationManager.IMPORTANCE_LOW));

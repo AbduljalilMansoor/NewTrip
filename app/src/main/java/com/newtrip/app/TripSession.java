@@ -1,5 +1,9 @@
 package com.newtrip.app;
 
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.List;
+
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -21,6 +25,36 @@ public final class TripSession {
     public static final int NUM_TIERS = 5;
     public static final String[] TIER_NAMES = {"Low", "Med", "High", "Very High", "EV only"};
     public static final String[] TIER_RANGES = {"Below 60", "Between 60 to 90", "Between 90 to 130", "Above 130", "Any"};
+
+    // ---- خريطة الاستهلاك: [النمط][شريحة السرعة 10كم/س][شريحة التسارع] ----
+    public static final int SPEED_BINS = 14, ACCEL_BINS = 5;
+    public static final String[] ACCEL_NAMES = {"Hard brake", "Brake/coast", "Cruise", "Accelerate", "Hard accel"};
+
+    public static int speedBin(float kmh) { return Math.max(0, Math.min(SPEED_BINS - 1, (int) (kmh / 10f))); }
+
+    /** a بالمتر/ث²: < -1 ، < -0.3 ، ≤ 0.3 ، ≤ 1 ، > 1 */
+    public static int accelBin(float a) {
+        if (a < -1.0f) return 0;
+        if (a < -0.3f) return 1;
+        if (a <= 0.3f) return 2;
+        if (a <= 1.0f) return 3;
+        return 4;
+    }
+
+    public static final class Gc {
+        public long durMs, engMs;
+        public double distKm, out, in, fuel;
+        boolean empty() { return durMs == 0 && fuel == 0; }
+    }
+
+    // ---- نوافذ 30 ثانية (للمخططات التشتتية وخرائط SOC/الحرارة) ----
+    public static final long WIN_MS = 30_000;
+    public static final int MAX_WINS = 1500;
+    /** فهارس float[] لكل نافذة */
+    public static final int W_T = 0, W_DUR = 1, W_DIST = 2, W_SPD = 3, W_OUT = 4, W_IN = 5, W_FUEL = 6,
+            W_ENG = 7, W_SOC = 8, W_FORCED = 9, W_TARGET = 10, W_TEMP = 11, W_AC = 12, W_MODE = 13,
+            W_MAXKW = 14, W_HOUR = 15, W_LEN = 16;
+    private static final double NAN_S = -999;
 
     public static int tierOf(boolean engineOn, Float speedKmh) {
         if (!engineOn) return T_EV;
@@ -99,6 +133,19 @@ public final class TripSession {
     /** [نمط القيادة][شريحة السرعة]. الرحلات القديمة (قبل Analyze) بلا بيانات: hasTiers = false. */
     public final Tier[][] tiers = new Tier[NUM_MODES][NUM_TIERS];
     public boolean hasTiers = true;
+    public final Gc[][][] grid = new Gc[NUM_MODES][SPEED_BINS][ACCEL_BINS];
+    public final List<float[]> wins = new ArrayList<>();
+    /** زمن إشارة HCU_POWERMODEFED: EV / HEV (بالملّي ثانية) */
+    public long evSigMs, hevSigMs;
+    public float carAvgFuel = Float.NaN, carAvgEnergy = Float.NaN;   // آخر قراءة من السيارة
+    // حالة النافذة الجارية (لا تُحفظ)
+    private long wDur, wEng, wForced, wAc, wTempMs;
+    private double wDist, wOut, wIn, wFuel, wTempSum;
+    private float wMaxKw, wTarget = Float.NaN, wSoc = Float.NaN;
+    private int wMode;
+    private long wStartWall;
+    private float prevV = Float.NaN, accelEma;
+    private long accelAccMs;
     /** وضع توفير الطاقة اليدوي (يُستخدم إذا لم تتوفر إشارة من السيارة). */
     public boolean manualForced;
     public float manualTarget = Float.NaN;
@@ -112,6 +159,8 @@ public final class TripSession {
     public TripSession() {
         for (int m = 0; m < NUM_MODES; m++) for (int k = 0; k < 2; k++) cells[m][k] = new Cell();
         for (int m = 0; m < NUM_MODES; m++) for (int t = 0; t < NUM_TIERS; t++) tiers[m][t] = new Tier();
+        for (int m = 0; m < NUM_MODES; m++)
+            for (int a = 0; a < SPEED_BINS; a++) for (int b = 0; b < ACCEL_BINS; b++) grid[m][a][b] = new Gc();
     }
 
     public static int bucket(Integer mode) {
@@ -143,31 +192,103 @@ public final class TripSession {
         if (lastAdvance > 0) {
             long dt = now - lastAdvance;
             if (dt > 0 && dt <= 5000) { // الفجوات الطويلة (السيارة مطفأة) لا تُحسب
-                Cell c = cur(l);
+                int mode = bucketOf(l);
+                boolean eng = l.engineOn;
+                Cell c = cells[mode][eng ? ENG : EV];
                 c.durMs += dt;
                 double h = dt / 3_600_000.0;
                 Float v = l.speedKmh;
-                if (v != null) c.distKm += v * h;
+                double dKm = v != null ? v * h : 0;
+                c.distKm += dKm;
+                double outK = 0, inK = 0;
                 Float p = l.packKw;
+                float netKw = 0;
                 if (p != null) {
                     float out = negIsIn ? p : -p;   // موجب = صرف من البطارية
-                    if (out >= 0) c.kwhOut += out * h;
-                    else c.kwhIn += -out * h;
+                    netKw = out;
+                    if (out >= 0) outK = out * h; else inK = -out * h;
                 }
-                Tier t = tiers[bucketOf(l)][tierOf(l.engineOn, l.speedKmh)];
+                c.kwhOut += outK; c.kwhIn += inK;
+                Tier t = tiers[mode][tierOf(eng, v)];
                 t.durMs += dt;
-                if (v != null) t.distKm += v * h;
-                if (isForced(l)) { t.forcedMs += dt; t.noteTarget(targetSoc(l)); }
+                t.distKm += dKm;
+                boolean forced = isForced(l);
+                float target = targetSoc(l);
+                if (forced) { t.forcedMs += dt; t.noteTarget(target); }
                 else t.smartMs += dt;
+
+                // التسارع (متوسط متحرك) ثم خلية الشبكة
+                float vv = v == null ? 0f : v;
+                if (Float.isNaN(prevV)) prevV = vv;
+                accelAccMs += dt;
+                if (accelAccMs >= 300) {
+                    float inst = (vv - prevV) / 3.6f / (accelAccMs / 1000f);
+                    accelEma = 0.6f * accelEma + 0.4f * inst;
+                    prevV = vv;
+                    accelAccMs = 0;
+                }
+                Gc g = grid[mode][speedBin(vv)][accelBin(accelEma)];
+                g.durMs += dt; g.distKm += dKm; g.out += outK; g.in += inK;
+                if (eng) g.engMs += dt;
+
+                // النافذة الجارية
+                if (wDur == 0) wStartWall = System.currentTimeMillis();
+                wDur += dt; wDist += dKm; wOut += outK; wIn += inK;
+                if (eng) wEng += dt;
+                if (forced) { wForced += dt; if (!Float.isNaN(target)) wTarget = target; }
+                Float temp = l.outsideTempC;
+                if (temp != null) { wTempSum += temp * (double) dt; wTempMs += dt; }
+                if (l.acOn != null && l.acOn > 0) wAc += dt;
+                if (netKw > wMaxKw) wMaxKw = netKw;
+                wMode = mode;
+                if (l.socPct != null) wSoc = l.socPct;
+                if (l.hevMode != null) { if (l.hevMode == 1) evSigMs += dt; else if (l.hevMode == 2) hevSigMs += dt; }
+                if (wDur >= WIN_MS) flushWindow();
             }
         }
         lastAdvance = now;
     }
 
+    private void flushWindow() {
+        if (wDur > 0 && wins.size() < MAX_WINS) {
+            float[] w = new float[W_LEN];
+            double hrs = wDur / 3_600_000.0;
+            w[W_T] = (wStartWall - startWall) / 1000f;
+            w[W_DUR] = wDur / 1000f;
+            w[W_DIST] = (float) wDist;
+            w[W_SPD] = hrs > 0 ? (float) (wDist / hrs) : 0f;
+            w[W_OUT] = (float) wOut; w[W_IN] = (float) wIn; w[W_FUEL] = (float) wFuel;
+            w[W_ENG] = wEng / 1000f;
+            w[W_SOC] = wSoc;
+            w[W_FORCED] = wForced * 2 > wDur ? 1f : 0f;
+            w[W_TARGET] = wTarget;
+            w[W_TEMP] = wTempMs > 0 ? (float) (wTempSum / wTempMs) : Float.NaN;
+            w[W_AC] = wDur > 0 ? (float) wAc / wDur : 0f;
+            w[W_MODE] = wMode;
+            w[W_MAXKW] = wMaxKw;
+            Calendar cal = Calendar.getInstance();
+            cal.setTimeInMillis(wStartWall);
+            w[W_HOUR] = cal.get(Calendar.HOUR_OF_DAY);
+            wins.add(w);
+        }
+        wDur = wEng = wForced = wAc = wTempMs = 0;
+        wDist = wOut = wIn = wFuel = wTempSum = 0;
+        wMaxKw = 0; wTarget = Float.NaN;
+    }
+
+    /** يُستدعى عند إنهاء الرحلة: يحفظ ما تبقى من النافذة الأخيرة إن كانت 5 ثوانٍ فأكثر. */
+    public synchronized void closeWindow() {
+        if (wDur >= 5000) flushWindow();
+    }
+
     public synchronized void addFuel(double litres, Live l) {
         if (!active || litres <= 0) return;
         cur(l).fuelL += litres;
-        tiers[bucketOf(l)][tierOf(l.engineOn, l.speedKmh)].fuelL += litres;
+        int mode = bucketOf(l);
+        tiers[mode][tierOf(l.engineOn, l.speedKmh)].fuelL += litres;
+        float vv = l.speedKmh == null ? 0f : l.speedKmh;
+        grid[mode][speedBin(vv)][accelBin(accelEma)].fuel += litres;
+        wFuel += litres;
     }
 
     /** Forced Power Saving؟ الإشارة من السيارة إن وُجدت، وإلا الاختيار اليدوي. */
@@ -182,6 +303,8 @@ public final class TripSession {
 
     /** يُستدعى كل ثانية لتسجيل البطارية والوقود والعداد. */
     public synchronized void sampleLevels(Live l) {
+        if (l.carAvgFuel != null) carAvgFuel = l.carAvgFuel;
+        if (l.carAvgEnergy != null) carAvgEnergy = l.carAvgEnergy;
         if (!active) return;
         Cell c = cur(l);
         Float soc = l.socPct;
@@ -236,7 +359,27 @@ public final class TripSession {
     public synchronized long engineMs() { return total(ENG).durMs; }
 
     /** Hybrid إذا اشتغل المحرك في أي لحظة من الرحلة، وإلا Electric. */
-    public synchronized String driveType() { return engineMs() > 0 ? "Hybrid" : "Electric"; }
+    public synchronized String driveType() {
+        if (evSigMs + hevSigMs > 0) {      // من إشارة السيارة HCU_POWERMODEFED (1=EV, 2=HEV)
+            double evShareT = evSigMs / (double) (evSigMs + hevSigMs);
+            if (evShareT > 0.95) return "Electric";
+            if (evShareT < 0.05) return "Hybrid";
+            return "Mixed";
+        }
+        return engineMs() > 0 ? "Hybrid" : "Electric";
+    }
+
+    /** متوسط حرارة الخارج (°C) من النوافذ، NaN إن لم تُسجَّل. */
+    public synchronized double avgTempC() {
+        double sum = 0, w = 0;
+        for (float[] x : wins) if (!Float.isNaN(x[W_TEMP])) { sum += x[W_TEMP] * x[W_DUR]; w += x[W_DUR]; }
+        return w > 0 ? sum / w : Double.NaN;
+    }
+
+    public synchronized boolean hasGrid() {
+        for (Gc[][] a : grid) for (Gc[] b : a) for (Gc g : b) if (!g.empty()) return true;
+        return false;
+    }
 
     public synchronized long smartMs() {
         long x = 0;
@@ -267,6 +410,16 @@ public final class TripSession {
             if (!Float.isNaN(t.targetMax) && (Float.isNaN(hi) || t.targetMax > hi)) hi = t.targetMax;
         }
         return targetText(lo, hi);
+    }
+
+    /** {أدنى, أعلى} لهدف SOC في وضع Forced، أو NaN إن لم يوجد. */
+    public synchronized float[] targetRange() {
+        float lo = Float.NaN, hi = Float.NaN;
+        for (Tier[] row : tiers) for (Tier t : row) {
+            if (!Float.isNaN(t.targetMin) && (Float.isNaN(lo) || t.targetMin < lo)) lo = t.targetMin;
+            if (!Float.isNaN(t.targetMax) && (Float.isNaN(hi) || t.targetMax > hi)) hi = t.targetMax;
+        }
+        return new float[]{lo, hi};
     }
 
     public static String targetText(float lo, float hi) {
@@ -302,6 +455,25 @@ public final class TripSession {
             tr.put(row);
         }
         o.put("tiers", tr);
+        o.put("evSigMs", evSigMs).put("hevSigMs", hevSigMs);
+        putF(o, "carAvgFuel", carAvgFuel); putF(o, "carAvgEnergy", carAvgEnergy);
+        JSONArray gr = new JSONArray();
+        for (int m = 0; m < NUM_MODES; m++)
+            for (int a = 0; a < SPEED_BINS; a++)
+                for (int b = 0; b < ACCEL_BINS; b++) {
+                    Gc g = grid[m][a][b];
+                    if (g.empty()) continue;
+                    gr.put(new JSONArray().put(m).put(a).put(b).put(g.durMs).put(g.engMs)
+                            .put(g.distKm).put(g.out).put(g.in).put(g.fuel));
+                }
+        o.put("grid", gr);
+        JSONArray wa = new JSONArray();
+        for (float[] w : wins) {
+            JSONArray r = new JSONArray();
+            for (float x : w) r.put(Float.isNaN(x) ? NAN_S : Math.round(x * 1000.0) / 1000.0);
+            wa.put(r);
+        }
+        o.put("wins", wa);
         JSONArray a = new JSONArray();
         for (int m = 0; m < NUM_MODES; m++) {
             JSONArray row = new JSONArray();
@@ -333,6 +505,27 @@ public final class TripSession {
                 for (int t = 0; t < NUM_TIERS && t < row.length(); t++)
                     s.tiers[m][t] = Tier.fromJson(row.getJSONObject(t));
             }
+        }
+        s.evSigMs = o.optLong("evSigMs"); s.hevSigMs = o.optLong("hevSigMs");
+        s.carAvgFuel = getF(o, "carAvgFuel"); s.carAvgEnergy = getF(o, "carAvgEnergy");
+        JSONArray gr = o.optJSONArray("grid");
+        if (gr != null) for (int i = 0; i < gr.length(); i++) {
+            JSONArray r = gr.getJSONArray(i);
+            int m = r.getInt(0), sb = r.getInt(1), ab = r.getInt(2);
+            if (m < 0 || m >= NUM_MODES || sb < 0 || sb >= SPEED_BINS || ab < 0 || ab >= ACCEL_BINS) continue;
+            Gc g = s.grid[m][sb][ab];
+            g.durMs = r.getLong(3); g.engMs = r.getLong(4);
+            g.distKm = r.getDouble(5); g.out = r.getDouble(6); g.in = r.getDouble(7); g.fuel = r.getDouble(8);
+        }
+        JSONArray wa = o.optJSONArray("wins");
+        if (wa != null) for (int i = 0; i < wa.length(); i++) {
+            JSONArray r = wa.getJSONArray(i);
+            float[] w = new float[W_LEN];
+            for (int k = 0; k < W_LEN && k < r.length(); k++) {
+                double x = r.getDouble(k);
+                w[k] = x <= -998 ? Float.NaN : (float) x;
+            }
+            s.wins.add(w);
         }
         JSONArray a = o.getJSONArray("cells");
         for (int m = 0; m < NUM_MODES && m < a.length(); m++) {

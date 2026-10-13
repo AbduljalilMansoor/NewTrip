@@ -44,6 +44,7 @@ public final class SessionStore {
 
     /** ينهي الرحلة ويحفظها في السجل، ويعيد الملف. يعيد null إذا كانت أقصر من MIN_SAVE_KM فلا تُحفظ. */
     public synchronized File finish(TripSession s) {
+        s.closeWindow();
         s.active = false;
         s.endWall = System.currentTimeMillis();
         // رحلة قصيرة جداً بلا مسافة ولا وقت يُذكر: لا تُحفظ. أما رحلة وقوف طويلة (Park) فتُحفظ لأن لها استهلاكاً.

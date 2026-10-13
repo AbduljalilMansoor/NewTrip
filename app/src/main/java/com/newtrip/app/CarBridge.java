@@ -39,14 +39,16 @@ public final class CarBridge {
             "FUELROLLINGCOUNTER_4B2", "HCU_DRIVEMODE_JT_522"};
 
     /**
-     * أسماء إشارات وضع توفير الطاقة وهدف SOC. غير معروفة لهذا الطراز بعد، فالقوائم فارغة عمداً.
-     * بعد تشغيل «تشخيص ← إشارات SOC» أضف الأسماء الصحيحة هنا (مثال: "getXXX_SOCMODE").
-     * إلى أن تُضاف يستخدم التطبيق الاختيار اليدوي (Smart / Forced + الهدف).
-     * POWER_SAVE_FORCED_VALUE = القيمة التي تعني Forced Power Saving.
+     * معايرة وضع توفير الطاقة: HCU_SOCMANAGEFED يعطي رقماً خاماً ومعناه غير موثّق في Display Mirror
+     * (يسجّله فقط). لذلك يعاير المستخدم القيمتين من نافذة 🔋 ← «Calibrate». null = غير معاير (يُستخدم الاختيار اليدوي).
      */
-    static final String[] POWER_SAVE_SIGNALS = {};
-    static final String[] TARGET_SOC_SIGNALS = {};
-    static final int POWER_SAVE_FORCED_VALUE = 1;
+    static volatile Integer socMgrForcedRaw, socMgrSmartRaw;
+
+    static void loadCalibration(android.content.Context c) {
+        android.content.SharedPreferences p = c.getSharedPreferences(MainActivity.PREFS, android.content.Context.MODE_PRIVATE);
+        socMgrForcedRaw = p.contains("socmgr_forced") ? p.getInt("socmgr_forced", 0) : null;
+        socMgrSmartRaw = p.contains("socmgr_smart") ? p.getInt("socmgr_smart", 0) : null;
+    }
 
     public interface Callback {
         /** يُستدعى قبل تغيّر أي قيمة، لكي تُحسب الفترة الماضية بالقيم القديمة. */
@@ -318,24 +320,47 @@ public final class CarBridge {
         if (odo == null) odo = range(vf(PERF_ODOMETER), 0.1f, 2_000_000);
         live.odometerKm = odo;
 
-        // المدى الكهربائي الحقيقي: أقصى مدى للبطارية 100 كم، فالمدى = نسبة الشحن × 100 كم.
-        // قيمة السيارة (CLTC) أكبر من الواقع فنحتفظ بها للتشخيص فقط.
+        // EV range: Display Mirror يعرض VCU_WLTC_RANGEAVAL مباشرة، وهو الأقرب للواقع (CLTC متفائل).
+        // أقصى مدى للبطارية 100 كم. عند غياب القراءة: SOC × 100 كم. (CLTC للتشخيص فقط)
+        Float wltc = range(al("getVCU_WLTC_RANGEAVAL"), 0, 2000);
         live.evRangeRawKm = range(al("getVCU_CLTC_RANGEAVAL"), 0, 2000);
-        live.evRangeKm = soc == null ? null : soc * Live.EV_MAX_RANGE_KM / 100f;
+        Float evKm = null;
+        if (wltc != null) evKm = Math.min(wltc.floatValue(), Live.EV_MAX_RANGE_KM);
+        else if (soc != null) evKm = soc.floatValue() * Live.EV_MAX_RANGE_KM / 100f;
+        live.evRangeKm = evKm;
 
-        Float ps = firstOf(POWER_SAVE_SIGNALS);
-        live.powerSaveForced = ps == null ? null : ps.intValue() == POWER_SAVE_FORCED_VALUE;
-        Float tg = range(firstOf(TARGET_SOC_SIGNALS), 0, 100);
-        live.forcedSocTarget = tg;
+        // وضع القيادة HEV/EV وإدارة SOC وهدفه (أسماء الإشارات من Display Mirror)
+        Float pm = al("getHCU_POWERMODEFED");
+        live.hevMode = pm == null ? null : Integer.valueOf(pm.intValue());
+        Float mg = al("getHCU_SOCMANAGEFED");
+        live.socMgrRaw = mg == null ? null : Integer.valueOf(mg.intValue());
+        Float sf = al("getHCU_SETSOCFED");
+        live.socFedRaw = sf == null ? null : Integer.valueOf(sf.intValue());
+        live.forcedSocTarget = (sf != null && sf >= 25 && sf <= 70) ? sf : null;
+        Boolean forced = null;
+        if (mg != null) {
+            Integer fr = socMgrForcedRaw, sm = socMgrSmartRaw;
+            int m = mg.intValue();
+            if (fr != null && m == fr) forced = Boolean.TRUE;
+            else if (sm != null && m == sm) forced = Boolean.FALSE;
+            else if (fr != null) forced = Boolean.FALSE;
+            else if (sm != null) forced = Boolean.TRUE;
+        }
+        live.powerSaveForced = forced;
+
+        live.outsideTempC = range(al("getEXTERNALTEMPERATURE_C"), -50, 80);
+        live.cabinTempC = range(al("getTMS_INCARTEMP"), -50, 90);
+        live.packTempMaxC = range(al("getBMS_TBOXHVBATTMAXT"), -50, 120);
+        Float ac = al("getTMS_ACREQUESTDISPLAYSTS");
+        live.acOn = ac == null ? null : Integer.valueOf(ac.intValue());
+        Float rg = al("getHCU_EGYREGENLEVEL");
+        live.regenLevel = rg == null ? null : Integer.valueOf(rg.intValue());
+        live.carAvgFuel = range(al("getHCU_4_G_AVGFUCNS"), 0, 60);
+        live.carAvgEnergy = range(al("getHCU_4_G_AVGENERGYCNS"), 0, 200);
         live.rangeKm = clusterRangeKm();
 
         Float g = al("getVCU_1_G_PRNDGEARACT");
         live.gear = g == null ? null : g.intValue();
-    }
-
-    private Float firstOf(String[] names) {
-        for (String n : names) { Float v = al(n); if (v != null) return v; }
-        return null;
     }
 
     /** للتشخيص: كل قراءات Autolink التي يبدو اسمها متعلقاً بالبطارية/وضع التوفير، مع قيمتها الآن. */

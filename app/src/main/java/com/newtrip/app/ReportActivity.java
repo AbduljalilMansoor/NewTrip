@@ -23,13 +23,13 @@ public class ReportActivity extends Activity {
 
     @Override
     protected void attachBaseContext(Context base) {
-        super.attachBaseContext(UiScale.wrap(base));   // كل المقاسات أصغر بـ 30%
+        super.attachBaseContext(UiScale.wrap(base));   // مقاس المحتوى من UiScale
     }
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        UiScale.applyWindow(this);                      // النافذة 70% من الشاشة
+        UiScale.applyWindow(this);                      // النافذة شبه كاملة (UiScale)
         String path = getIntent().getStringExtra(EXTRA_FILE);
         TripSession s = path == null ? null : SessionStore.read(new File(path));
 

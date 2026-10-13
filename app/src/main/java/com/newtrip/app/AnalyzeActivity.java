@@ -75,7 +75,11 @@ public class AnalyzeActivity extends Activity {
         back.setPadding(0, 0, p, 0);
         back.setOnClickListener(v -> finish());
         header.addView(back);
-        header.addView(Ui.text(this, "Analyze", 28, Ui.TEXT, true));
+        header.addView(Ui.text(this, "Analyze", 28, Ui.TEXT, true), new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView dash = Ui.button(this, "📈  Dashboard", Ui.EV, v -> startActivity(new android.content.Intent(this, DashboardActivity.class)));
+        dash.setTextSize(16);
+        dash.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 8));
+        header.addView(dash);
         root.addView(header);
 
         LinearLayout body = Ui.row(this);
