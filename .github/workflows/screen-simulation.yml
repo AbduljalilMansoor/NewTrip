@@ -1,0 +1,36 @@
+name: Android Multi-Screen Simulation
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: macos-13 # macOS runners support hardware acceleration for faster emulators
+    strategy:
+      matrix:
+        # Define the different screen sizes/devices you want to simulate
+        include:
+          - device-profile: "pixel_6"
+            screen-type: "Standard Phone"
+          - device-profile: "pixel_c"
+            screen-type: "Tablet"
+          - device-profile: "pixel_fold"
+            screen-type: "Foldable Screen"
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Build and Run UI Tests on ${{ matrix.screen-type }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          profile: ${{ matrix.device-profile }} # Injects the specific screen layout
+          script: ./gradlew connectedCheck # Executes your UI tests on that specific screen
