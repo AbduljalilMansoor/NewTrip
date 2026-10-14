@@ -42,12 +42,14 @@ public final class CarBridge {
      * معايرة وضع توفير الطاقة: HCU_SOCMANAGEFED يعطي رقماً خاماً ومعناه غير موثّق في Display Mirror
      * (يسجّله فقط). لذلك يعاير المستخدم القيمتين من نافذة 🔋 ← «Calibrate». null = غير معاير (يُستخدم الاختيار اليدوي).
      */
-    static volatile Integer socMgrForcedRaw, socMgrSmartRaw;
+    /** قيم HCU_SOCMANAGEFED المؤكدة على السيارة: Smart = 4 ، Forced = 5. (المعايرة اليدوية تتجاوزها إن وُجدت.) */
+    static final int SOC_MGR_SMART_DEFAULT = 4, SOC_MGR_FORCED_DEFAULT = 5;
+    static volatile Integer socMgrForcedRaw = SOC_MGR_FORCED_DEFAULT, socMgrSmartRaw = SOC_MGR_SMART_DEFAULT;
 
     static void loadCalibration(android.content.Context c) {
         android.content.SharedPreferences p = c.getSharedPreferences(MainActivity.PREFS, android.content.Context.MODE_PRIVATE);
-        socMgrForcedRaw = p.contains("socmgr_forced") ? p.getInt("socmgr_forced", 0) : null;
-        socMgrSmartRaw = p.contains("socmgr_smart") ? p.getInt("socmgr_smart", 0) : null;
+        socMgrForcedRaw = p.getInt("socmgr_forced", SOC_MGR_FORCED_DEFAULT);
+        socMgrSmartRaw = p.getInt("socmgr_smart", SOC_MGR_SMART_DEFAULT);
     }
 
     public interface Callback {

@@ -14,8 +14,10 @@ import android.view.View;
  */
 final class CombinedGauge extends View {
     // الزوايا بنظام أندرويد: 0 = الساعة 3، موجبة مع عقارب الساعة. الفتحة في الأسفل وفي الأعلى.
-    private static final float LEFT_START = 112f, LEFT_SWEEP = 152f;     // من أسفل اليسار إلى أعلى اليسار
-    private static final float RIGHT_START = 68f, RIGHT_SWEEP = -152f;   // من أسفل اليمين إلى أعلى اليمين
+    // الفتحة السفلية واسعة (حوالي 80°) كما في التصميم المرجعي، وفجوة صغيرة في الأعلى.
+    private static final float LEFT_START = 130f, LEFT_SWEEP = 136f;     // من أسفل اليسار إلى أعلى اليسار
+    private static final float RIGHT_START = 50f, RIGHT_SWEEP = -136f;   // من أسفل اليمين إلى أعلى اليمين
+    private static final int BLUE = 0xFF29B6F6, ORANGE = 0xFFFFA726;     // بطارية = أزرق ، وقود = برتقالي
 
     private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint arc = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -63,7 +65,7 @@ final class CombinedGauge extends View {
     @Override
     protected void onDraw(Canvas c) {
         float s = Math.min(getWidth(), getHeight());
-        float stroke = s * 0.075f;
+        float stroke = s * 0.055f;
         float cx = getWidth() / 2f, cy = getHeight() / 2f, r = (s - stroke) / 2f;
         box.set(cx - r, cy - r, cx + r, cy + r);
 
@@ -77,53 +79,53 @@ final class CombinedGauge extends View {
 
         arc.setStrokeWidth(stroke);
         if (!Float.isNaN(socShown) && socShown > 0.5f) {
-            arc.setColor(Ui.EV);
+            arc.setColor(BLUE);
             c.drawArc(box, LEFT_START, LEFT_SWEEP * socShown / 100f, false, arc);
         }
         if (!Float.isNaN(fuelShown) && fuelShown > 0.5f) {
-            arc.setColor(fuelShown < 15f ? Ui.BAD : Ui.ENG);
+            arc.setColor(ORANGE);
             c.drawArc(box, RIGHT_START, RIGHT_SWEEP * fuelShown / 100f, false, arc);
         }
 
         // النسب المئوية أعلى اليسار واليمين
         txt.setTypeface(Typeface.DEFAULT_BOLD);
-        txt.setColor(Ui.EV);
-        txt.setTextSize(r * 0.34f);
-        c.drawText(Float.isNaN(socShown) ? "—" : Math.round(socShown) + "%", cx - r * 0.50f, cy - r * 0.38f, txt);
-        txt.setColor(Ui.ENG);
-        c.drawText(Float.isNaN(fuelShown) ? "—" : Math.round(fuelShown) + "%", cx + r * 0.50f, cy - r * 0.38f, txt);
+        txt.setColor(BLUE);
+        txt.setTextSize(r * 0.20f);
+        c.drawText(Float.isNaN(socShown) ? "—" : Math.round(socShown) + "%", cx - r * 0.50f, cy - r * 0.42f, txt);
+        txt.setColor(ORANGE);
+        c.drawText(Float.isNaN(fuelShown) ? "—" : Math.round(fuelShown) + "%", cx + r * 0.50f, cy - r * 0.42f, txt);
         txt.setTypeface(Typeface.DEFAULT);
         txt.setColor(Ui.MUTED);
-        txt.setTextSize(r * 0.12f);
-        c.drawText("BATTERY", cx - r * 0.50f, cy - r * 0.60f, txt);
-        c.drawText("FUEL", cx + r * 0.50f, cy - r * 0.60f, txt);
+        txt.setTextSize(r * 0.075f);
+        c.drawText("BATTERY", cx - r * 0.50f, cy - r * 0.68f, txt);
+        c.drawText("FUEL", cx + r * 0.50f, cy - r * 0.68f, txt);
 
         // الوسط: المدى الكلي
-        txt.setTextSize(r * 0.115f);
-        c.drawText("TOTAL COMBINED RANGE", cx, cy - r * 0.08f, txt);
+        txt.setTextSize(r * 0.075f);
+        c.drawText("TOTAL COMBINED RANGE", cx, cy - r * 0.12f, txt);
         boolean both = !Float.isNaN(evKm) && !Float.isNaN(fuelKm);
         txt.setTypeface(Typeface.DEFAULT_BOLD);
         txt.setColor(Ui.TEXT);
-        txt.setTextSize(r * 0.36f);
-        c.drawText(both ? Math.round(evKm + fuelKm) + " km" : "—", cx, cy + r * 0.26f, txt);
+        txt.setTextSize(r * 0.22f);
+        c.drawText(both ? Math.round(evKm + fuelKm) + " km" : "—", cx, cy + r * 0.12f, txt);
         txt.setTypeface(Typeface.DEFAULT);
         txt.setColor(Ui.MUTED);
-        txt.setTextSize(r * 0.105f);
-        c.drawText("EST. REMAINING", cx, cy + r * 0.42f, txt);
+        txt.setTextSize(r * 0.07f);
+        c.drawText("EST. REMAINING", cx, cy + r * 0.26f, txt);
 
         // مدى الكهرباء ومدى البنزين تحت الوسط
-        drawRange(c, "EV Range", evKm, Ui.EV, cx - r * 0.42f, cy + r * 0.66f, r);
-        drawRange(c, "HV Fuel Range", fuelKm, Ui.ENG, cx + r * 0.42f, cy + r * 0.66f, r);
+        drawRange(c, "EV Range", evKm, BLUE, cx - r * 0.28f, cy + r * 0.56f, r);
+        drawRange(c, "HV Fuel Range", fuelKm, ORANGE, cx + r * 0.28f, cy + r * 0.56f, r);
     }
 
     private void drawRange(Canvas c, String label, float km, int color, float x, float y, float r) {
         txt.setTypeface(Typeface.DEFAULT);
         txt.setColor(Ui.MUTED);
-        txt.setTextSize(r * 0.10f);
+        txt.setTextSize(r * 0.07f);
         c.drawText(label, x, y, txt);
         txt.setTypeface(Typeface.DEFAULT_BOLD);
         txt.setColor(color);
-        txt.setTextSize(r * 0.17f);
-        c.drawText(Float.isNaN(km) ? "—" : Math.round(km) + " km", x, y + r * 0.19f, txt);
+        txt.setTextSize(r * 0.11f);
+        c.drawText(Float.isNaN(km) ? "—" : Math.round(km) + " km", x, y + r * 0.13f, txt);
     }
 }

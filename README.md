@@ -97,12 +97,14 @@ New Trip يعمل كنافذة بحجم **96% × 94%** من شاشة السيا�
 | `VCU_WLTC_RANGEAVAL` | مدى الكهرباء (يعرضه Display Mirror مباشرة؛ التطبيق يحدّه بـ 100 كم) |
 | `HCU_POWERMODEFED` | 1 = EV ، 2 = HEV |
 | `HCU_SETSOCFED` | هدف SOC % (من 25 إلى 70) |
-| `HCU_SOCMANAGEFED` | حالة إدارة SOC (قيمة خام؛ Display Mirror يسجّلها فقط ولا يفسّرها) ← تُعاير من نافذة 🔋 |
+| `HCU_SOCMANAGEFED` | وضع إدارة SOC: 4 = Smart ، 5 = Forced |
 | `EXTERNALTEMPERATURE_C` ، `TMS_INCARTEMP` ، `BMS_TBOXHVBATTMAXT` | حرارة الخارج / المقصورة / البطارية |
 | `TMS_ACREQUESTDISPLAYSTS` ، `HCU_EGYREGENLEVEL` | المكيف / مستوى الاسترداد |
 | `HCU_4_G_AVGFUCNS` ، `HCU_4_G_AVGENERGYCNS` | متوسط الوقود والطاقة المحسوب من السيارة |
 
-**معايرة وضع SOC:** افتح شارة 🔋 ← «Calibrate: the car is NOW in Smart/Forced» أثناء وجود السيارة في ذلك الوضع. تُحفظ القيمة الخام ويصبح الوضع تلقائياً في كل الرحلات.
+**وضع SOC:** `HCU_SOCMANAGEFED` ← **Smart = 4 ، Forced = 5** (مضمّنة كقيم افتراضية في `CarBridge`، فالقراءة تلقائية دون معايرة). نافذة 🔋 ما زالت تتيح إعادة المعايرة أو الرجوع للافتراضي.
+
+**HEV/EV:** الشارة أعلى العداد (وفي شاشة الرحلة) تعرض `EV` أو `HEV` من `HCU_POWERMODEFED` (1 = EV ، 2 = HEV).
 
 **ما يُسجَّل لكل رحلة (جديد):** شبكة سرعة×تسارع (14×5 لكل نمط قيادة)، ونوافذ 30 ثانية (سرعة، مسافة، كهرباء، وقود، SOC، حرارة، مكيف، Forced/Smart، الهدف، النمط، ذروة القدرة)، وزمن EV/HEV من الإشارة، ومتوسطات السيارة.
 

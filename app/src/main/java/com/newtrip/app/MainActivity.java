@@ -305,15 +305,14 @@ public class MainActivity extends Activity {
         Live l = svc != null ? svc.live() : preview != null ? preview.live : null;
         String raw = l == null || l.socMgrRaw == null ? "—" : String.valueOf(l.socMgrRaw);
         String tgt = l == null || l.socFedRaw == null ? "—" : String.valueOf(l.socFedRaw);
-        boolean calibrated = CarBridge.socMgrForcedRaw != null || CarBridge.socMgrSmartRaw != null;
-        final String[] items = {
+                final String[] items = {
                 "Smart Power Save (manual)",
                 "Forced Power Saving (manual)",
                 "Calibrate: the car is NOW in Smart",
                 "Calibrate: the car is NOW in Forced",
-                "Clear calibration (use manual)"};
+                "Reset to defaults (Smart=4, Forced=5)"};
         new AlertDialog.Builder(this)
-                .setTitle("SOC mode   [car socMgr=" + raw + "  target=" + tgt + (calibrated ? "  ✓ auto" : "  manual") + "]")
+                .setTitle("SOC mode   [car socMgr=" + raw + "  target=" + tgt + "  ✓ auto" + "]")
                 .setItems(items, (d, which) -> {
                     if (which == 0) applySocMode(false, Float.NaN);
                     else if (which == 1) chooseTarget();
@@ -335,7 +334,7 @@ public class MainActivity extends Activity {
         if (smartRaw != null) e.putInt("socmgr_smart", smartRaw);
         e.apply();
         CarBridge.loadCalibration(this);
-        android.widget.Toast.makeText(this, clear ? "Calibration cleared" : "Saved. SOC mode is now read from the car.",
+        android.widget.Toast.makeText(this, clear ? "Reset: Smart=4, Forced=5" : "Saved. SOC mode is now read from the car.",
                 android.widget.Toast.LENGTH_LONG).show();
     }
 
@@ -363,6 +362,12 @@ public class MainActivity extends Activity {
         }
         if (pSoc != null) pSoc.setText(socText());
         if (vSoc != null) vSoc.setText(socText());
+    }
+
+    /** HEV أم EV: من HCU_POWERMODEFED (1 = EV ، 2 = HEV)، وعند غياب القراءة يُستدل من تشغيل المحرك. */
+    private static boolean isHev(Live l) {
+        if (l.hevMode != null && (l.hevMode == 1 || l.hevMode == 2)) return l.hevMode == 2;
+        return l.engineOn;
     }
 
     /** مدى البنزين: من مدى شاشة العدادات (ناقصاً مدى الكهرباء إذا كان كلياً). */
@@ -528,8 +533,9 @@ public class MainActivity extends Activity {
         if (pStatus == null || preview == null) return;
         Live l = preview.live;
         pMode.setText(Live.modeName(l.driveMode));
-        pKind.setText(l.engineOn ? "⛽ محرك" : "⚡ كهرباء");
-        pKind.setBackground(Ui.round(l.engineOn ? Ui.ENG : Ui.EV, Ui.dp(this, 10)));
+        boolean hev = isHev(l);
+        pKind.setText(hev ? "HEV" : "EV");
+        pKind.setBackground(Ui.round(hev ? Ui.ENG : Ui.EV, Ui.dp(this, 10)));
         gauge.setValues(l.socPct, l.fuelPct, l.evRangeKm, fuelRangeKm(l));
         pStatus.setText("الاتصال: " + l.source);
     }
@@ -697,8 +703,9 @@ public class MainActivity extends Activity {
         boolean parked = TripSession.isParked(l);
         vMode.setText(parked ? "PARK" : Live.modeName(l.driveMode));
         vMode.setBackground(Ui.round(parked ? 0xFF1565C0 : modeColor(l.driveMode), Ui.dp(this, 10)));
-        vSource.setText(l.engineOn ? "⛽ ENGINE" : "⚡ EV");
-        vSource.setBackground(Ui.round(l.engineOn ? 0xFF8A5A00 : 0xFF0D5C8C, Ui.dp(this, 10)));
+        boolean hevNow = isHev(l);
+        vSource.setText(hevNow ? "HEV" : "EV");
+        vSource.setBackground(Ui.round(hevNow ? 0xFF8A5A00 : 0xFF0D5C8C, Ui.dp(this, 10)));
         boolean forced = s.isForced(l);
         vSoc.setText(forced ? "🔋 Forced · " + TripSession.targetText(s.targetSoc(l), s.targetSoc(l)) : "🔋 Smart Power Save");
         vElapsed.setText(Ui.clock(System.currentTimeMillis() - s.startWall));
