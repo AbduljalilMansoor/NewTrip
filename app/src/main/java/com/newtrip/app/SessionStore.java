@@ -43,10 +43,16 @@ public final class SessionStore {
     public static final long MIN_SAVE_MS = 60_000;
 
     /** ينهي الرحلة ويحفظها في السجل، ويعيد الملف. يعيد null إذا كانت أقصر من MIN_SAVE_KM فلا تُحفظ. */
-    public synchronized File finish(TripSession s) {
+    public synchronized File finish(TripSession s) { return finishAt(s, System.currentTimeMillis()); }
+
+    /** وقت آخر حفظ للرحلة الجارية (للكشف عن رحلة قديمة لم تُنهَ)، أو 0. */
+    public synchronized long activeModified() { return active.exists() ? active.lastModified() : 0; }
+
+    /** ينهي الرحلة بوقت نهاية محدد (يُستخدم عند استرداد رحلة قديمة). */
+    public synchronized File finishAt(TripSession s, long endWallMs) {
         s.closeWindow();
         s.active = false;
-        s.endWall = System.currentTimeMillis();
+        s.endWall = endWallMs;
         // رحلة قصيرة جداً بلا مسافة ولا وقت يُذكر: لا تُحفظ. أما رحلة وقوف طويلة (Park) فتُحفظ لأن لها استهلاكاً.
         if (s.totalDistKm() < MIN_SAVE_KM && s.totalDurMs() < MIN_SAVE_MS) { active.delete(); return null; }
         File f = new File(historyDir, "trip_" + s.startWall + ".json");

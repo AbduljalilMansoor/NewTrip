@@ -19,6 +19,7 @@ final class DashModel {
     static final String[] TARGET = {"Any", "25%", "40%", "55%", "70%"};
     static final int[] TARGET_V = {0, 25, 40, 55, 70};
     static final String[] TEMP = {"Any", "< 25 °C", "25–35 °C", "35–42 °C", "> 42 °C"};
+    static final String[] DIST = {"Any", "< 10 km", "10–30 km", "30–60 km", "> 60 km"};
 
     static final String[] MAP_TYPE = {"Speed × Acceleration", "Speed × Battery level", "Speed × Outside temp"};
     static final String[] MAP_METRIC = {"Fuel (L/100km)", "Battery net (kWh/100km)", "Engine-on share (%)", "Time share (%)"};
@@ -41,7 +42,7 @@ final class DashModel {
     /** 1 لتر بنزين ≈ 8.9 كيلوواط ساعة (لمقارنة الوقود والكهرباء بوحدة واحدة) */
     static final double KWH_PER_L = 8.9;
 
-    int period, mode, drive, soc, target, temp;
+    int period, mode, drive, soc, target, temp, dist;
 
     private final List<TripSession> all;
     final List<TripSession> trips = new ArrayList<>();
@@ -73,6 +74,13 @@ final class DashModel {
             if (s.startWall < c.getTimeInMillis()) return false;
         } else if (period == 2) { if (s.startWall < now - 7L * 86400000L) return false;
         } else if (period == 3) { if (s.startWall < now - 30L * 86400000L) return false; }
+        if (dist > 0) {
+            double d = s.totalDistKm();
+            if (dist == 1 && d >= 10) return false;
+            if (dist == 2 && (d < 10 || d >= 30)) return false;
+            if (dist == 3 && (d < 30 || d >= 60)) return false;
+            if (dist == 4 && d < 60) return false;
+        }
         if (drive == 1 && !"Hybrid".equals(s.driveType())) return false;
         if (drive == 2 && !"Electric".equals(s.driveType())) return false;
         if (soc == 1 && !(s.forcedMs() == 0 && s.smartMs() > 0)) return false;
@@ -140,7 +148,7 @@ final class DashModel {
     }
 
     // ------------------------------------------------------------ خريطة الاستهلاك
-    static final class Acc { double dur, eng, dist, out, in, fuel; }
+    static final class Acc { double dur, eng, dist, out, in, fuel, rpmW, rpmD; int n; }
 
     static final class Heat {
         String[] rows, cols; double[][] val; String[][] tip; String unit; boolean cost; boolean any;
@@ -463,6 +471,312 @@ final class DashModel {
             out.add("🏆 Best trip: " + Ui.date(bestT.s.startWall) + ", " + f(bestT.dist, 1) + " km at " + f(bestT.energyEq100(), 1)
                     + " kWh-eq/100km (" + bestT.s.driveType() + ", " + bestT.s.socModeLabel() + ").");
         out.add("These are correlations in your own trips (not controlled tests); more trips in each condition make them more reliable.");
+        return out;
+    }
+
+    // ============================================================ علاقات PHEV (البطارية، وضع SOC، الهدف، المسافة، RPM)
+    static final String[] SOC_BAND = {"0–20%", "20–40%", "40–60%", "60–80%", "80–100%"};
+    static final String[] DIST_BAND = {"< 10 km", "10–30 km", "30–60 km", "> 60 km"};
+    static final String[] SET_NAMES = {"Smart", "Forced 25%", "Forced 40%", "Forced 55%", "Forced 70%", "Forced ?"};
+    static final String[] DEF_BAND = {"At / above target", "1–15% below", "16–30% below", "31–45% below", "> 45% below"};
+    static final String[] SPD_BAND = {"< 30", "30–60", "60–90", "90–120", "> 120"};
+    static final String[] RPM_BAND = {"Engine off", "< 1500", "1500–2500", "2500–3500", "> 3500"};
+    static final String[] FCOL = {"Speed (km/h)", "Engine RPM"};
+    static final String[] FMETRIC = {"Fuel flow (L/h)", "Fuel (L/100km)"};
+    static final String[] MSMETRIC = {"Fuel (L/100km)", "Energy-eq (kWh/100km)", "Avg RPM"};
+
+    private static int socBand(float soc) { return Math.max(0, Math.min(4, (int) (soc / 20f))); }
+    private static int distBand(double d) { return d < 10 ? 0 : d < 30 ? 1 : d < 60 ? 2 : 3; }
+    private static int deficitBand(double d) { return d <= 0 ? 0 : d <= 15 ? 1 : d <= 30 ? 2 : d <= 45 ? 3 : 4; }
+    private static int spdBand(float v) { return v < 30 ? 0 : v < 60 ? 1 : v < 90 ? 2 : v < 120 ? 3 : 4; }
+    private static int rpmBand(float r) { return Float.isNaN(r) ? 0 : r < 1500 ? 1 : r < 2500 ? 2 : r < 3500 ? 3 : 4; }
+
+    /** رقم إعداد SOC لنافذة: 0 = Smart ، 1..4 = Forced بهدف 25/40/55/70 ، 5 = Forced بلا هدف معروف. */
+    private static int setIndex(float[] w) {
+        if (w[TripSession.W_FORCED] <= 0.5f) return 0;
+        int k = snapTarget(w[TripSession.W_TARGET]);
+        return k < 1 ? 5 : k;
+    }
+
+    private interface Val { double of(Acc x); }
+
+    private Heat makeHeat(String[] rn, String[] cn, Acc[][] a, Val val, String unit, boolean cost, boolean skipEmptyRows, String unitsTip) {
+        Heat h = new Heat();
+        h.unit = unit; h.cost = cost;
+        java.util.ArrayList<Integer> keep = new java.util.ArrayList<>();
+        for (int r = 0; r < rn.length; r++) {
+            boolean any = false;
+            for (int c = 0; c < cn.length; c++) if (a[r][c].n > 0) any = true;
+            if (any || !skipEmptyRows) keep.add(r);
+        }
+        h.cols = cn;
+        h.rows = new String[keep.size()];
+        h.val = new double[keep.size()][cn.length];
+        h.tip = new String[keep.size()][cn.length];
+        for (int i = 0; i < keep.size(); i++) {
+            int r = keep.get(i);
+            h.rows[i] = rn[r];
+            for (int c = 0; c < cn.length; c++) {
+                Acc x = a[r][c];
+                double v = x.n > 0 ? val.of(x) : Double.NaN;
+                h.val[i][c] = v;
+                if (!Double.isNaN(v)) h.any = true;
+                h.tip[i][c] = x.n == 0 ? "No data" : rn[r] + "  ×  " + cn[c] + "\n" + x.n + " " + unitsTip + "  ·  "
+                        + f(x.dist, 1) + " km  ·  " + f(x.dur / 60, 1) + " min  ·  fuel " + f(x.fuel, 2) + " L"
+                        + (x.rpmD > 0 ? "  ·  avg RPM " + f(x.rpmW / x.rpmD, 0) : "");
+            }
+        }
+        return h;
+    }
+
+    private static Acc[][] accGrid(int r, int c) {
+        Acc[][] a = new Acc[r][c];
+        for (Acc[] row : a) for (int j = 0; j < c; j++) row[j] = new Acc();
+        return a;
+    }
+
+    private static void addWin(Acc x, float[] w) {
+        x.n++;
+        x.dur += w[TripSession.W_DUR]; x.eng += w[TripSession.W_ENG]; x.dist += w[TripSession.W_DIST];
+        x.out += w[TripSession.W_OUT]; x.in += w[TripSession.W_IN]; x.fuel += w[TripSession.W_FUEL];
+        float rpm = w[TripSession.W_RPM];
+        if (!Float.isNaN(rpm)) { x.rpmW += rpm * w[TripSession.W_DUR]; x.rpmD += w[TripSession.W_DUR]; }
+    }
+
+    // ---- 1) البطارية عند البداية مقابل استهلاك الوقود (رحلات) ----
+    static final class Trend { boolean ok; double slope, intercept, r; int n; }
+    Trend trend = new Trend();
+
+    Scat startSocScatter() {
+        List<float[]> v = new ArrayList<>(); List<Integer> col = new ArrayList<>(), ref = new ArrayList<>();
+        double sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0; int n = 0;
+        for (int i = 0; i < pts.size(); i++) {
+            Pt p = pts.get(i);
+            float soc = p.s.socStart;
+            if (Float.isNaN(soc) || p.dist < 2) continue;
+            double y = p.fuel / p.dist * 100;
+            String l = p.s.socModeLabel();
+            col.add(l.startsWith("Smart") ? 0 : l.startsWith("Forced") ? 1 : 2);
+            v.add(new float[]{soc, (float) y, (float) Math.max(1, Math.min(60, p.dist))});
+            ref.add(i);
+            sx += soc; sy += y; sxx += soc * soc; syy += y * y; sxy += soc * y; n++;
+        }
+        trend = new Trend();
+        trend.n = n;
+        double den = n * sxx - sx * sx;
+        if (n >= 4 && den > 1e-9) {
+            trend.slope = (n * sxy - sx * sy) / den;
+            trend.intercept = (sy - trend.slope * sx) / n;
+            double dy = n * syy - sy * sy;
+            trend.r = dy > 1e-9 ? (n * sxy - sx * sy) / Math.sqrt(den * dy) : 0;
+            trend.ok = true;
+        }
+        Scat s = new Scat();
+        int m = v.size();
+        s.x = new float[m]; s.y = new float[m]; s.size = new float[m]; s.color = new int[m]; s.ref = new int[m];
+        for (int i = 0; i < m; i++) {
+            s.x[i] = v.get(i)[0]; s.y[i] = v.get(i)[1]; s.size[i] = v.get(i)[2]; s.color[i] = col.get(i); s.ref[i] = ref.get(i);
+        }
+        s.legend = new String[]{"Smart", "Forced", "Mixed"};
+        return s;
+    }
+
+    // ---- 2) البطارية عند البداية × مسافة الرحلة ----
+    Heat socDistHeat() {
+        Acc[][] a = accGrid(5, 4);
+        for (Pt p : pts) {
+            if (Float.isNaN(p.s.socStart) || p.dist <= 0) continue;
+            Acc x = a[socBand(p.s.socStart)][distBand(p.s.totalDistKm())];
+            x.n++; x.dist += p.dist; x.dur += p.durH * 3600; x.fuel += p.fuel; x.out += p.out; x.in += p.in;
+        }
+        return makeHeat(SOC_BAND, DIST_BAND, a, x -> x.dist >= 3 ? x.fuel / x.dist * 100 : Double.NaN, "L/100km", true, false, "trips");
+    }
+
+    // ---- 3) نمط القيادة × إعداد SOC (نوافذ) ----
+    Heat modeSocHeat(int metric) {
+        Acc[][] a = accGrid(TripSession.NUM_MODES, 6);
+        for (float[] w : wins) {
+            int m = (int) w[TripSession.W_MODE];
+            if (m < 0 || m >= TripSession.NUM_MODES) continue;
+            addWin(a[m][setIndex(w)], w);
+        }
+        Val v = metric == 0 ? x -> x.dist >= 1 ? x.fuel / x.dist * 100 : Double.NaN
+                : metric == 1 ? x -> x.dist >= 1 ? (x.fuel * KWH_PER_L + x.out - x.in) / x.dist * 100 : Double.NaN
+                : x -> x.rpmD >= 60 ? x.rpmW / x.rpmD : Double.NaN;
+        return makeHeat(MODE_NAMES, SET_NAMES, a, v, metric == 0 ? "L/100km" : metric == 1 ? "kWh-eq/100km" : "RPM", true, true, "windows");
+    }
+
+    // ---- 4) Forced: الفجوة بين الهدف والبطارية × السرعة/RPM ----
+    Heat forcedStressHeat(int colMode, int metric) {
+        String[] cn = colMode == 0 ? SPD_BAND : RPM_BAND;
+        Acc[][] a = accGrid(5, cn.length);
+        for (float[] w : wins) {
+            if (w[TripSession.W_FORCED] <= 0.5f) continue;
+            float tg = w[TripSession.W_TARGET], soc = w[TripSession.W_SOC];
+            if (Float.isNaN(tg) || Float.isNaN(soc)) continue;
+            int c = colMode == 0 ? spdBand(w[TripSession.W_SPD]) : rpmBand(w[TripSession.W_RPM]);
+            addWin(a[deficitBand(tg - soc)][c], w);
+        }
+        Val v = metric == 0 ? x -> x.dur >= 60 ? x.fuel / (x.dur / 3600.0) : Double.NaN
+                : x -> x.dist >= 0.5 ? x.fuel / x.dist * 100 : Double.NaN;
+        return makeHeat(DEF_BAND, cn, a, v, metric == 0 ? "L/h" : "L/100km", true, true, "windows");
+    }
+
+    // ---- 5) بدايات Forced ----
+    static final class ForcedRow { Pt p; float tMin, soc, target, deficit; }
+
+    List<ForcedRow> forcedStarts() {
+        List<ForcedRow> out = new ArrayList<>();
+        for (Pt p : pts) {
+            float[] fs = p.s.forcedStart();
+            if (fs == null) continue;
+            ForcedRow r = new ForcedRow();
+            r.p = p; r.tMin = fs[0] / 60f; r.soc = fs[1]; r.target = fs[2]; r.deficit = fs[3];
+            out.add(r);
+        }
+        out.sort((x, y) -> Long.compare(y.p.s.startWall, x.p.s.startWall));
+        return out;
+    }
+
+    // ---- 6) الخط الزمني لرحلة ----
+    static final class Timeline {
+        String title; float[] t, soc, target, speed, rpm, fuelLph; boolean[] forced; float[] evT; boolean[] evForced; float[] evTarget; float[] evSoc;
+        boolean empty() { return t == null || t.length < 2; }
+    }
+
+    /** الرحلات المصفّاة التي لديها نوافذ، لقائمة اختيار الخط الزمني. */
+    List<Integer> timelineTrips() {
+        List<Integer> out = new ArrayList<>();
+        for (int i = 0; i < pts.size(); i++) if (pts.get(i).s.wins.size() >= 2) out.add(i);
+        return out;
+    }
+
+    Timeline timeline(int ptIndex) {
+        Timeline tl = new Timeline();
+        if (ptIndex < 0 || ptIndex >= pts.size()) return tl;
+        TripSession s = pts.get(ptIndex).s;
+        int n = s.wins.size();
+        tl.title = Ui.date(s.startWall) + "  ·  " + f(pts.get(ptIndex).dist, 1) + " km";
+        tl.t = new float[n]; tl.soc = new float[n]; tl.target = new float[n]; tl.speed = new float[n]; tl.rpm = new float[n];
+        tl.fuelLph = new float[n]; tl.forced = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            float[] w = s.wins.get(i);
+            tl.t[i] = (w[TripSession.W_T] + w[TripSession.W_DUR] / 2f) / 60f;
+            tl.soc[i] = w[TripSession.W_SOC];
+            tl.forced[i] = w[TripSession.W_FORCED] > 0.5f;
+            tl.target[i] = tl.forced[i] ? w[TripSession.W_TARGET] : Float.NaN;
+            tl.speed[i] = w[TripSession.W_SPD];
+            tl.rpm[i] = w[TripSession.W_RPM];
+            tl.fuelLph[i] = w[TripSession.W_DUR] > 0 ? w[TripSession.W_FUEL] / (w[TripSession.W_DUR] / 3600f) : Float.NaN;
+        }
+        int e = s.events.size();
+        tl.evT = new float[e]; tl.evForced = new boolean[e]; tl.evTarget = new float[e]; tl.evSoc = new float[e];
+        for (int i = 0; i < e; i++) {
+            float[] ev = s.events.get(i);
+            tl.evT[i] = ev[0] / 60f; tl.evForced[i] = ev[1] > 0.5f; tl.evTarget[i] = ev[2]; tl.evSoc[i] = ev[3];
+        }
+        return tl;
+    }
+
+    // ---- 7) ملاحظات PHEV ----
+    List<String> phevInsights() {
+        List<String> out = new ArrayList<>();
+        if (pts.isEmpty()) { out.add("No trips match these filters."); return out; }
+        startSocScatter();
+        Trend tr = trend;
+        if (tr.ok && Math.abs(tr.r) >= 0.3) {
+            double per10 = tr.slope * 10;
+            out.add(per10 < 0
+                    ? "🔋 Starting with more battery saves fuel: every +10% of battery at trip start ≈ " + f(-per10, 1)
+                        + " L/100km less (r = " + f(tr.r, 2) + ", " + tr.n + " trips)."
+                    : "🔋 In your data, a fuller battery at the start did NOT lower fuel use (+10% ≈ +" + f(per10, 1)
+                        + " L/100km, r = " + f(tr.r, 2) + "). Trip length or Forced mode may be hiding the effect.");
+        } else if (tr.n >= 4) {
+            out.add("🔋 No clear link between starting battery and fuel use yet (" + tr.n + " trips). Distance and SOC mode also matter; see the map below.");
+        } else {
+            out.add("🔋 Need at least 4 trips with a start battery level to measure its effect on fuel.");
+        }
+
+        // مقارنة أعلى وأدنى شريحة بداية
+        Acc[] sb = new Acc[5];
+        for (int i = 0; i < 5; i++) sb[i] = new Acc();
+        for (Pt p : pts) if (!Float.isNaN(p.s.socStart)) { Acc x = sb[socBand(p.s.socStart)]; x.n++; x.dist += p.dist; x.fuel += p.fuel; }
+        int hi = -1, lo = -1;
+        for (int i = 0; i < 5; i++) if (sb[i].n >= 2 && sb[i].dist >= 5) { if (lo < 0) lo = i; hi = i; }
+        if (hi > lo && lo >= 0) {
+            double a = sb[hi].fuel / sb[hi].dist * 100, b = sb[lo].fuel / sb[lo].dist * 100;
+            out.add("📊 Trips starting at " + SOC_BAND[hi] + " battery used " + f(a, 1) + " L/100km, versus " + f(b, 1)
+                    + " L/100km when starting at " + SOC_BAND[lo] + (b > 0 ? " (" + (a <= b ? "" : "+") + f((a - b) / b * 100, 0) + "%)." : "."));
+        }
+
+        // أثر المسافة
+        Acc[] db = new Acc[4];
+        for (int i = 0; i < 4; i++) db[i] = new Acc();
+        for (Pt p : pts) { Acc x = db[distBand(p.s.totalDistKm())]; x.n++; x.dist += p.dist; x.fuel += p.fuel; }
+        int dl = -1, dh = -1;
+        for (int i = 0; i < 4; i++) if (db[i].n >= 2 && db[i].dist >= 5) { if (dl < 0) dl = i; dh = i; }
+        if (dh > dl && dl >= 0)
+            out.add("📏 " + DIST_BAND[dl] + " trips average " + f(db[dl].fuel / db[dl].dist * 100, 1) + " L/100km; "
+                    + DIST_BAND[dh] + " trips average " + f(db[dh].fuel / db[dh].dist * 100, 1) + " L/100km"
+                    + (db[dl].fuel / db[dl].dist < db[dh].fuel / db[dh].dist ? " (the battery covers more of a short trip)." : "."));
+
+        // Forced: الفجوة بين الهدف والبطارية
+        Acc near = new Acc(), far = new Acc(), farHi = new Acc(), farLo = new Acc();
+        for (float[] w : wins) {
+            if (w[TripSession.W_FORCED] <= 0.5f) continue;
+            float tg = w[TripSession.W_TARGET], soc = w[TripSession.W_SOC];
+            if (Float.isNaN(tg) || Float.isNaN(soc)) continue;
+            double d = tg - soc;
+            if (d <= 15) addWin(near, w);
+            else if (d > 30) {
+                addWin(far, w);
+                float rpm = w[TripSession.W_RPM];
+                if (!Float.isNaN(rpm) && rpm > 3000) addWin(farHi, w);
+                else if (!Float.isNaN(rpm) && rpm < 2000) addWin(farLo, w);
+            }
+        }
+        if (near.dur >= 180 && far.dur >= 180) {
+            double a = far.fuel / (far.dur / 3600.0), b = near.fuel / (near.dur / 3600.0);
+            out.add("⚡ In Forced mode, driving with the battery more than 30% below the target burned " + f(a, 1) + " L/h, versus "
+                    + f(b, 1) + " L/h when within 15% of the target" + (b > 0.05 ? " (" + f(a / b, 1) + "×)." : "."));
+        }
+        if (farHi.dur >= 120 && farLo.dur >= 120) {
+            double a = farHi.fuel / (farHi.dur / 3600.0), b = farLo.fuel / (farLo.dur / 3600.0);
+            out.add("🔥 With a large gap to target, engine speed above 3000 RPM burned " + f(a, 1) + " L/h versus " + f(b, 1)
+                    + " L/h below 2000 RPM. High speed + high RPM while charging is the most expensive combination.");
+        }
+
+        // توقيت بدء Forced
+        List<ForcedRow> fr = forcedStarts();
+        if (!fr.isEmpty()) {
+            double t = 0, sc = 0, tg = 0; int nt = 0, big = 0;
+            for (ForcedRow r : fr) {
+                t += r.tMin; if (!Float.isNaN(r.soc)) { sc += r.soc; nt++; } if (!Float.isNaN(r.target)) tg += r.target;
+                if (!Float.isNaN(r.deficit) && r.deficit >= 30) big++;
+            }
+            out.add("🕒 Forced charging was used in " + fr.size() + " trips; it started on average " + f(t / fr.size(), 0) + " min in, at "
+                    + (nt > 0 ? f(sc / nt, 0) : "—") + "% battery with a target of " + f(tg / fr.size(), 0) + "%"
+                    + (big > 0 ? ". In " + big + " of them the target was 30% or more above the battery level." : "."));
+        }
+
+        // أفضل/أسوأ مزيج (نمط × إعداد SOC)
+        Acc[][] ms = accGrid(TripSession.NUM_MODES, 6);
+        for (float[] w : wins) {
+            int m = (int) w[TripSession.W_MODE];
+            if (m >= 0 && m < TripSession.NUM_MODES) addWin(ms[m][setIndex(w)], w);
+        }
+        int bm = -1, bs = -1, wm = -1, wsx = -1; double bv = 1e9, wv = -1;
+        for (int m = 0; m < TripSession.NUM_MODES; m++) for (int k = 0; k < 6; k++) {
+            Acc x = ms[m][k];
+            if (x.dist < 5) continue;
+            double v = x.fuel / x.dist * 100;
+            if (v < bv) { bv = v; bm = m; bs = k; }
+            if (v > wv) { wv = v; wm = m; wsx = k; }
+        }
+        if (bm >= 0 && (bm != wm || bs != wsx))
+            out.add("🏁 Lowest fuel: " + MODE_NAMES[bm] + " + " + SET_NAMES[bs] + " at " + f(bv, 1) + " L/100km; highest: "
+                    + MODE_NAMES[wm] + " + " + SET_NAMES[wsx] + " at " + f(wv, 1) + " L/100km.");
+        out.add("These are patterns in your own trips, not controlled tests; they firm up as you record more trips in each condition.");
         return out;
     }
 }

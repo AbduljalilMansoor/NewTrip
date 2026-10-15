@@ -36,7 +36,10 @@ final class HeatmapView extends View {
         invalidate();
     }
 
-    private float left() { return 70 * d; }
+    private float labelDp = 70;
+    /** عرض عمود أسماء الصفوف بالـ dp (الافتراضي 70). */
+    void setLabelWidth(int dp) { labelDp = dp; }
+    private float left() { return labelDp * d; }
     private float top() { return 34 * d; }
     private float cellH() { return 27 * d; }
 

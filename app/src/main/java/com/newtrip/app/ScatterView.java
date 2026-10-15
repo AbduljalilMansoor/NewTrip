@@ -18,6 +18,15 @@ final class ScatterView extends View {
     private OnPoint cb;
     private float x0, x1, y0, y1;
     private int selected = -1;
+    private boolean hasTrend;
+    private double trendSlope, trendIntercept;
+
+    /** خط اتجاه (انحدار خطي) فوق النقاط، أو null/غير صالح لإخفائه. */
+    void setTrend(DashModel.Trend t) {
+        hasTrend = t != null && t.ok;
+        if (hasTrend) { trendSlope = t.slope; trendIntercept = t.intercept; }
+        invalidate();
+    }
 
     ScatterView(Context c) {
         super(c);
@@ -25,7 +34,7 @@ final class ScatterView extends View {
     }
 
     void setData(DashModel.Scat data, String xLabel, String yLabel, boolean bigPoints, OnPoint listener) {
-        s = data; xl = xLabel; yl = yLabel; big = bigPoints; cb = listener; selected = -1;
+        s = data; xl = xLabel; yl = yLabel; big = bigPoints; cb = listener; selected = -1; hasTrend = false;
         if (s != null && !s.empty()) {
             x0 = y0 = Float.MAX_VALUE; x1 = y1 = -Float.MAX_VALUE;
             for (int i = 0; i < s.x.length; i++) {
@@ -89,6 +98,15 @@ final class ScatterView extends View {
         c.drawText(yl, 14 * d, T() + (getHeight() - T() - B()) / 2 + 4 * d, p);
         c.restore();
 
+        // خط الاتجاه
+        if (hasTrend) {
+            float xa = x0 + (x1 - x0) * 0.04f, xb = x1 - (x1 - x0) * 0.04f;
+            float ya = (float) (trendSlope * xa + trendIntercept), yb = (float) (trendSlope * xb + trendIntercept);
+            ya = Math.max(y0, Math.min(y1, ya)); yb = Math.max(y0, Math.min(y1, yb));
+            p.setColor(Ui.TEXT); p.setStrokeWidth(2.5f * d); p.setAlpha(200);
+            c.drawLine(sx(xa), sy(ya), sx(xb), sy(yb), p);
+            p.setAlpha(255); p.setStrokeWidth(1);
+        }
         // النقاط
         for (int i = 0; i < s.x.length; i++) {
             p.setColor(DashModel.PAL[s.color[i] % DashModel.PAL.length]);

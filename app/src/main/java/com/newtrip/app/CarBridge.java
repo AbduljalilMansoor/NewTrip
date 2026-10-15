@@ -350,6 +350,10 @@ public final class CarBridge {
         }
         live.powerSaveForced = forced;
 
+        Float pw = al("getFLZCU_9_POWERMODE");
+        live.powerMode = pw == null ? null : Integer.valueOf(pw.intValue());
+        live.coolantTempC = range(al("getENGINECOOLANTTEMPERATURE"), -50, 160);
+        live.acSetTempC = range(al("getTMS_SETTEMPERATURE_L_C"), 10, 40);
         live.outsideTempC = range(al("getEXTERNALTEMPERATURE_C"), -50, 80);
         live.cabinTempC = range(al("getTMS_INCARTEMP"), -50, 90);
         live.packTempMaxC = range(al("getBMS_TBOXHVBATTMAXT"), -50, 120);

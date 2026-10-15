@@ -32,6 +32,7 @@ import java.util.Locale;
 public class MainActivity extends Activity {
     static final String PREFS = "newtrip";
     static final String PREF_NEG_IS_IN = "neg_is_in";
+    static final String EXTRA_CHECK_UPDATE = "check_update";
     static final String PREF_FORCED = "soc_forced";
     static final String PREF_TARGET = "soc_target";
     /** مدى شاشة العدادات (MCU_PERIOD_TCDTE) هو مدى البنزين فقط، وليس المدى الكلي. */
@@ -58,7 +59,7 @@ public class MainActivity extends Activity {
     private final TextView[][] vVals = new TextView[TripSession.NUM_MODES][2];
     private final LinearLayout[][] vRows = new LinearLayout[TripSession.NUM_MODES][2];
     // عناصر شاشة البداية
-    private TextView pStatus, pMode, pKind, pSoc;
+    private TextView pStatus, pMode, pKind, pSoc, pStorage;
     private CombinedGauge gauge;
     private TextView vSoc;
 
@@ -93,6 +94,10 @@ public class MainActivity extends Activity {
         updateBtn.setPadding(p, p / 2, p, p / 2);
         updateBtn.setOnClickListener(v -> onUpdateClicked());
         header.addView(updateBtn);
+        TextView settings = Ui.text(this, "⚙  Settings", 18, Ui.MUTED, false);
+        settings.setPadding(p, p / 2, p, p / 2);
+        settings.setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
+        header.addView(settings);
         TextView diag = Ui.text(this, "⚙  تشخيص", 18, Ui.MUTED, false);
         diag.setPadding(p, p / 2, p, p / 2);
         diag.setOnClickListener(v -> showDiagnostics());
@@ -121,11 +126,24 @@ public class MainActivity extends Activity {
                         updateBtn.setText("⬆  تحديث متوفر");
                         updateBtn.setTextColor(Ui.GOOD);
                     });
+                    // تحديث تلقائي: فقط إن كان مفعّلاً، ولا توجد رحلة جارية، والصلاحية ممنوحة
+                    if (Settings.autoUpdate(this) && !tripActive() && getPackageManager().canRequestPackageInstalls()) {
+                        ui.post(() -> Toast.makeText(this, "Updating New Trip to " + i.tag + "…", Toast.LENGTH_LONG).show());
+                        Updater.downloadAndInstall(this, i, (done, total) -> { });
+                    }
                 }
             } catch (Exception ignored) { }
         }).start();
     }
 
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (intent != null && intent.getBooleanExtra(EXTRA_CHECK_UPDATE, false)) {
+            intent.removeExtra(EXTRA_CHECK_UPDATE);
+            onUpdateClicked();
+        }
+    }
 
     private void onUpdateClicked() {
         if (tripActive()) {
@@ -220,7 +238,23 @@ public class MainActivity extends Activity {
         showingLive = live;
         content.removeAllViews();
         if (live) { stopPreview(); content.addView(buildLive()); }
-        else { content.addView(buildIdle()); startPreview(); }
+        else { content.addView(buildIdle()); startPreview(); refreshStorageBanner(); }
+    }
+
+    /** تنبيه على الشاشة الرئيسية إذا تجاوزت ملفات الرحلات الحد المضبوط. الحساب على خيط خلفي. */
+    private void refreshStorageBanner() {
+        final Context app = getApplicationContext();
+        new Thread(() -> {
+            final boolean over = StorageMonitor.isOver(app);
+            final String msg = "⚠ Trip files use " + StorageMonitor.human(StorageMonitor.usedBytes(app))
+                    + " (limit " + Settings.storageLimitMb(app) + " MB) — tap to manage";
+            ui.post(() -> {
+                if (pStorage == null) return;
+                pStorage.setVisibility(over ? View.VISIBLE : View.GONE);
+                pStorage.setText(msg);
+            });
+            if (over) StorageMonitor.check(app, false);
+        }, "storage-check").start();
     }
 
     private final Runnable refresh = new Runnable() {
@@ -282,6 +316,18 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, -2);
         slp.topMargin = Ui.dp(this, 16);
         p.addView(start, slp);
+
+        TextView copy = Ui.text(this, Settings.COPYRIGHT, 12, Ui.MUTED, false);
+        copy.setGravity(Gravity.CENTER);
+        copy.setPadding(0, Ui.dp(this, 8), 0, 0);
+        p.addView(copy);
+
+        pStorage = Ui.text(this, "", 14, Ui.BAD, true);
+        pStorage.setGravity(Gravity.CENTER);
+        pStorage.setPadding(0, Ui.dp(this, 6), 0, 0);
+        pStorage.setVisibility(View.GONE);
+        pStorage.setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
+        p.addView(pStorage);
 
         pStatus = Ui.text(this, "…", 13, Ui.MUTED, false);
         pStatus.setGravity(Gravity.CENTER);

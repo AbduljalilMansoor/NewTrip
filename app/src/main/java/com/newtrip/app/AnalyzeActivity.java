@@ -79,6 +79,12 @@ public class AnalyzeActivity extends Activity {
         TextView dash = Ui.button(this, "📈  Dashboard", Ui.EV, v -> startActivity(new android.content.Intent(this, DashboardActivity.class)));
         dash.setTextSize(16);
         dash.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 8));
+        TextView xl = Ui.button(this, "📊  Export Excel", Ui.CARD2, v -> exportSelected());
+        xl.setTextSize(16);
+        xl.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 8));
+        LinearLayout.LayoutParams xlp = new LinearLayout.LayoutParams(-2, -2);
+        xlp.setMarginEnd(Ui.dp(this, 10));
+        header.addView(xl, xlp);
         header.addView(dash);
         root.addView(header);
 
@@ -141,6 +147,20 @@ public class AnalyzeActivity extends Activity {
 
         setContentView(root);
         refresh();
+    }
+
+    private void exportSelected() {
+        final List<TripSession> sel = new ArrayList<>();
+        for (int i = 0; i < trips.size(); i++) if (selected[i]) sel.add(trips.get(i));
+        if (sel.isEmpty()) { android.widget.Toast.makeText(this, "Select one or more trips first", android.widget.Toast.LENGTH_LONG).show(); return; }
+        new Thread(() -> {
+            try {
+                final File out = Exporter.exportXlsx(this, sel);
+                runOnUiThread(() -> Exporter.offer(this, out, Exporter.MIME_XLSX));
+            } catch (Exception e) {
+                runOnUiThread(() -> android.widget.Toast.makeText(this, "Export failed: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show());
+            }
+        }, "export").start();
     }
 
     private TextView smallBtn(String s, View.OnClickListener l) {

@@ -24,6 +24,9 @@ public final class Live {
     public volatile Float packTempMaxC;    // BMS_TBOXHVBATTMAXT
     public volatile Integer acOn;          // TMS_ACREQUESTDISPLAYSTS
     public volatile Integer regenLevel;    // HCU_EGYREGENLEVEL
+    public volatile Integer powerMode;     // FLZCU_9_POWERMODE: 0 = OFF ، 1 = ACC ، 2 = ON ، 3 = START
+    public volatile Float coolantTempC;    // ENGINECOOLANTTEMPERATURE
+    public volatile Float acSetTempC;      // TMS_SETTEMPERATURE_L_C
     public volatile Float carAvgFuel;      // HCU_4_G_AVGFUCNS (لتر/100كم من السيارة)
     public volatile Float carAvgEnergy;    // HCU_4_G_AVGENERGYCNS (كيلوواط ساعة/100كم من السيارة)
     public volatile Float rangeKm;       // المدى في شاشة العدادات (MCU_PERIOD_TCDTE)

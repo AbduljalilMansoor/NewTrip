@@ -11,6 +11,7 @@ import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.File;
 import java.util.Locale;
@@ -53,6 +54,16 @@ public class ReportActivity extends Activity {
                     new Intent(this, AnalyzeActivity.class).putExtra(AnalyzeActivity.EXTRA_FILES, new String[]{f})));
             an.setTextSize(16);
             an.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 8));
+            LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(-2, -2);
+            gap.setMarginEnd(Ui.dp(this, 10));
+            TextView pdf = Ui.button(this, "📄  PDF", Ui.CARD2, v -> export(s, true));
+            pdf.setTextSize(16);
+            pdf.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 8));
+            TextView xls = Ui.button(this, "📊  Excel", Ui.CARD2, v -> export(s, false));
+            xls.setTextSize(16);
+            xls.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 8));
+            header.addView(pdf, gap);
+            header.addView(xls, gap);
             header.addView(an);
         }
         root.addView(header);
@@ -94,6 +105,8 @@ public class ReportActivity extends Activity {
 
     // ---------------- معلومات الرحلة المسجّلة ----------------
     private View tripInfo(TripSession s) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
         LinearLayout r = Ui.row(this);
         Ui.tile(r, "Mode", Ui.TEXT).setText(s.driveType());
         TextView soc = Ui.tile(r, "SOC mode", Ui.TEXT);
@@ -101,7 +114,45 @@ public class ReportActivity extends Activity {
         soc.setText(s.socModeLabel());
         Ui.tile(r, "Target SOC", Ui.TEXT).setText(s.targetLabel());
         Ui.tile(r, "Average speed", Ui.TEXT).setText(Ui.num(s.avgSpeedKmh(), 0) + " km/h");
-        return r;
+        box.addView(r);
+
+        LinearLayout r2 = Ui.row(this);
+        TextView rpm = Ui.tile(r2, "RPM avg / max", Ui.TEXT);
+        rpm.setTextSize(22);
+        rpm.setText(Ui.num(s.avgRpm(), 0) + " / " + Ui.num(s.maxRpm(), 0));
+        Ui.tile(r2, "A/C on", Ui.TEXT).setText(Ui.num(s.acSharePct(), 0) + "%");
+        TextView tmp = Ui.tile(r2, "Outside / cabin °C", Ui.TEXT);
+        tmp.setTextSize(22);
+        tmp.setText(Ui.num(s.avgTempC(), 0) + " / " + Ui.num(s.avgCabinC(), 0));
+        TextView pk = Ui.tile(r2, "Battery temp avg / max °C", Ui.TEXT);
+        pk.setTextSize(22);
+        pk.setText(Ui.num(s.avgPackC(), 0) + " / " + Ui.num(s.maxPackC(), 0));
+        Ui.tile(r2, "Regen level (avg)", Ui.TEXT).setText(Ui.num(s.avgRegen(), 1));
+        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(-1, -2);
+        lp2.topMargin = Ui.dp(this, 8);
+        box.addView(r2, lp2);
+
+        float[] fs = s.forcedStart();
+        if (fs != null) {
+            TextView f = Ui.text(this, "🔋 Forced charging started " + Ui.num(fs[0] / 60, 0) + " min into the trip at battery "
+                    + Ui.num(fs[1], 0) + "% with target " + Ui.num(fs[2], 0) + "% (gap " + Ui.num(fs[3], 0) + "%)", 16, Ui.ENG, true);
+            f.setPadding(0, Ui.dp(this, 10), 0, 0);
+            box.addView(f);
+        }
+        return box;
+    }
+
+    private void export(TripSession s, boolean pdf) {
+        Toast.makeText(this, "Exporting…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                File out = pdf ? Exporter.exportPdf(this, s)
+                        : Exporter.exportXlsx(this, java.util.Collections.singletonList(s));
+                runOnUiThread(() -> Exporter.offer(this, out, pdf ? Exporter.MIME_PDF : Exporter.MIME_XLSX));
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(this, "Export failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }, "export").start();
     }
 
     // ---------------- الملخص ----------------

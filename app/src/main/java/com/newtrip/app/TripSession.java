@@ -53,7 +53,9 @@ public final class TripSession {
     /** فهارس float[] لكل نافذة */
     public static final int W_T = 0, W_DUR = 1, W_DIST = 2, W_SPD = 3, W_OUT = 4, W_IN = 5, W_FUEL = 6,
             W_ENG = 7, W_SOC = 8, W_FORCED = 9, W_TARGET = 10, W_TEMP = 11, W_AC = 12, W_MODE = 13,
-            W_MAXKW = 14, W_HOUR = 15, W_LEN = 16;
+            W_MAXKW = 14, W_HOUR = 15, W_RPM = 16, W_RPMMAX = 17, W_REGEN = 18, W_CABIN = 19, W_PACK = 20,
+            W_SOC0 = 21, W_COOL = 22, W_SETT = 23, W_LEN = 24;
+    public static final int MAX_EVENTS = 80;
     private static final double NAN_S = -999;
 
     public static int tierOf(boolean engineOn, Float speedKmh) {
@@ -143,9 +145,23 @@ public final class TripSession {
     private double wDist, wOut, wIn, wFuel, wTempSum;
     private float wMaxKw, wTarget = Float.NaN, wSoc = Float.NaN;
     private int wMode;
-    private long wStartWall;
+    private long wStartWall, wStartAct;
+    /** مدة القيادة الفعلية (بدون فجوات الإيقاف) بالملّي ثانية؛ أساس محور الزمن في الرسوم. */
+    public long activeMs;
     private float prevV = Float.NaN, accelEma;
     private long accelAccMs;
+    // نافذة: RPM والاسترداد والحرارة
+    private double wRpmSum, wRegenSum, wCabinSum, wPackSum, wCoolSum, wSetSum;
+    private long wRpmMs, wRegenMs, wCabinMs, wPackMs, wCoolMs, wSetMs;
+    private float wRpmMax, wSoc0 = Float.NaN;
+    // إجماليات الرحلة (تُحفظ)
+    public double rpmSum, regenSum, cabinSum, packSum, coolSum;
+    public long rpmMs, regenMs, cabinMs, packMs, coolMs, acMs;
+    public float rpmMax, packMax = Float.NaN;
+    /** تغيّرات وضع Smart/Forced: {ثانية من بداية الرحلة، forced(0/1)، الهدف، SOC، السرعة} */
+    public final List<float[]> events = new ArrayList<>();
+    private boolean evInit, evLastForced;
+    private float evLastTarget = Float.NaN;
     /** وضع توفير الطاقة اليدوي (يُستخدم إذا لم تتوفر إشارة من السيارة). */
     public boolean manualForced;
     public float manualTarget = Float.NaN;
@@ -192,6 +208,7 @@ public final class TripSession {
         if (lastAdvance > 0) {
             long dt = now - lastAdvance;
             if (dt > 0 && dt <= 5000) { // الفجوات الطويلة (السيارة مطفأة) لا تُحسب
+                activeMs += dt;
                 int mode = bucketOf(l);
                 boolean eng = l.engineOn;
                 Cell c = cells[mode][eng ? ENG : EV];
@@ -232,7 +249,7 @@ public final class TripSession {
                 if (eng) g.engMs += dt;
 
                 // النافذة الجارية
-                if (wDur == 0) wStartWall = System.currentTimeMillis();
+                if (wDur == 0) { wStartWall = System.currentTimeMillis(); wStartAct = activeMs - dt; }
                 wDur += dt; wDist += dKm; wOut += outK; wIn += inK;
                 if (eng) wEng += dt;
                 if (forced) { wForced += dt; if (!Float.isNaN(target)) wTarget = target; }
@@ -243,6 +260,28 @@ public final class TripSession {
                 wMode = mode;
                 if (l.socPct != null) wSoc = l.socPct;
                 if (l.hevMode != null) { if (l.hevMode == 1) evSigMs += dt; else if (l.hevMode == 2) hevSigMs += dt; }
+                // RPM / A/C / الاسترداد / الحرارة
+                Integer rpm = l.rpm;
+                if (rpm != null && rpm > 0) {
+                    rpmSum += rpm * (double) dt; rpmMs += dt; if (rpm > rpmMax) rpmMax = rpm;
+                    wRpmSum += rpm * (double) dt; wRpmMs += dt; if (rpm > wRpmMax) wRpmMax = rpm;
+                }
+                if (l.acOn != null && l.acOn > 0) acMs += dt;
+                Integer rg = l.regenLevel;
+                if (rg != null) { regenSum += rg * (double) dt; regenMs += dt; wRegenSum += rg * (double) dt; wRegenMs += dt; }
+                Float cab = l.cabinTempC;
+                if (cab != null) { cabinSum += cab * (double) dt; cabinMs += dt; wCabinSum += cab * (double) dt; wCabinMs += dt; }
+                Float pk = l.packTempMaxC;
+                if (pk != null) {
+                    packSum += pk * (double) dt; packMs += dt; wPackSum += pk * (double) dt; wPackMs += dt;
+                    if (Float.isNaN(packMax) || pk > packMax) packMax = pk;
+                }
+                Float cl = l.coolantTempC;
+                if (cl != null) { coolSum += cl * (double) dt; coolMs += dt; wCoolSum += cl * (double) dt; wCoolMs += dt; }
+                Float st = l.acSetTempC;
+                if (st != null && l.acOn != null && l.acOn > 0) { wSetSum += st * (double) dt; wSetMs += dt; }
+                if (Float.isNaN(wSoc0) && l.socPct != null) wSoc0 = l.socPct;
+                noteSocMode(forced, target, l);
                 if (wDur >= WIN_MS) flushWindow();
             }
         }
@@ -253,7 +292,7 @@ public final class TripSession {
         if (wDur > 0 && wins.size() < MAX_WINS) {
             float[] w = new float[W_LEN];
             double hrs = wDur / 3_600_000.0;
-            w[W_T] = (wStartWall - startWall) / 1000f;
+            w[W_T] = wStartAct / 1000f;
             w[W_DUR] = wDur / 1000f;
             w[W_DIST] = (float) wDist;
             w[W_SPD] = hrs > 0 ? (float) (wDist / hrs) : 0f;
@@ -269,11 +308,57 @@ public final class TripSession {
             Calendar cal = Calendar.getInstance();
             cal.setTimeInMillis(wStartWall);
             w[W_HOUR] = cal.get(Calendar.HOUR_OF_DAY);
+            w[W_RPM] = wRpmMs > 0 ? (float) (wRpmSum / wRpmMs) : Float.NaN;
+            w[W_RPMMAX] = wRpmMs > 0 ? wRpmMax : Float.NaN;
+            w[W_REGEN] = wRegenMs > 0 ? (float) (wRegenSum / wRegenMs) : Float.NaN;
+            w[W_CABIN] = wCabinMs > 0 ? (float) (wCabinSum / wCabinMs) : Float.NaN;
+            w[W_PACK] = wPackMs > 0 ? (float) (wPackSum / wPackMs) : Float.NaN;
+            w[W_SOC0] = wSoc0;
+            w[W_COOL] = wCoolMs > 0 ? (float) (wCoolSum / wCoolMs) : Float.NaN;
+            w[W_SETT] = wSetMs > 0 ? (float) (wSetSum / wSetMs) : Float.NaN;
             wins.add(w);
         }
         wDur = wEng = wForced = wAc = wTempMs = 0;
         wDist = wOut = wIn = wFuel = wTempSum = 0;
         wMaxKw = 0; wTarget = Float.NaN;
+        wRpmSum = wRegenSum = wCabinSum = wPackSum = wCoolSum = wSetSum = 0;
+        wRpmMs = wRegenMs = wCabinMs = wPackMs = wCoolMs = wSetMs = 0;
+        wRpmMax = 0; wSoc0 = Float.NaN;
+    }
+
+    /** يسجّل لحظة تبديل Smart ↔ Forced أو تغيير الهدف مع مستوى البطارية والسرعة وقتها. */
+    private void noteSocMode(boolean forced, float target, Live l) {
+        boolean first = !evInit;
+        boolean changed = first ? forced
+                : forced != evLastForced || (forced && !(Float.isNaN(target) && Float.isNaN(evLastTarget)) && target != evLastTarget);
+        if (changed && events.size() < MAX_EVENTS) {
+            float t = activeMs / 1000f;
+            float soc = l.socPct != null ? l.socPct : Float.NaN;
+            if (first && !Float.isNaN(socStart)) soc = socStart;
+            events.add(new float[]{Math.max(0f, t), forced ? 1f : 0f, forced ? target : Float.NaN, soc,
+                    l.speedKmh == null ? 0f : l.speedKmh});
+        }
+        evInit = true; evLastForced = forced; evLastTarget = target;
+    }
+
+    // ---------- معلومات إضافية للتقارير واللوحة ----------
+    public synchronized double avgRpm() { return rpmMs > 0 ? rpmSum / rpmMs : Double.NaN; }
+    public synchronized double maxRpm() { return rpmMax > 0 ? rpmMax : Double.NaN; }
+    /** نسبة زمن تشغيل المكيف (0–100) أو NaN. */
+    public synchronized double acSharePct() { long d = totalDurMs(); return d > 0 ? acMs * 100.0 / d : Double.NaN; }
+    public synchronized double avgCabinC() { return cabinMs > 0 ? cabinSum / cabinMs : Double.NaN; }
+    public synchronized double avgPackC() { return packMs > 0 ? packSum / packMs : Double.NaN; }
+    public synchronized double maxPackC() { return packMax; }
+    public synchronized double avgRegen() { return regenMs > 0 ? regenSum / regenMs : Double.NaN; }
+    public synchronized double avgCoolantC() { return coolMs > 0 ? coolSum / coolMs : Double.NaN; }
+
+    /** أول دخول في Forced: {ثانية، SOC، الهدف، العجز = الهدف − SOC، السرعة} أو null. */
+    public synchronized float[] forcedStart() {
+        for (float[] e : events) if (e[1] > 0.5f) {
+            float deficit = Float.isNaN(e[2]) || Float.isNaN(e[3]) ? Float.NaN : e[2] - e[3];
+            return new float[]{e[0], e[3], e[2], deficit, e[4]};
+        }
+        return null;
     }
 
     /** يُستدعى عند إنهاء الرحلة: يحفظ ما تبقى من النافذة الأخيرة إن كانت 5 ثوانٍ فأكثر. */
@@ -474,6 +559,20 @@ public final class TripSession {
             wa.put(r);
         }
         o.put("wins", wa);
+        o.put("activeMs", activeMs);
+        o.put("rpmSum", rpmSum).put("rpmMs", rpmMs).put("rpmMax", rpmMax)
+         .put("regenSum", regenSum).put("regenMs", regenMs).put("cabinSum", cabinSum).put("cabinMs", cabinMs)
+         .put("packSum", packSum).put("packMs", packMs).put("coolSum", coolSum).put("coolMs", coolMs).put("acMs", acMs);
+        putF(o, "packMax", packMax);
+        double ar = avgRpm();
+        if (!Double.isNaN(ar)) o.put("avgRpm", Math.round(ar));
+        JSONArray ev = new JSONArray();
+        for (float[] e : events) {
+            JSONArray r = new JSONArray();
+            for (float x : e) r.put(Float.isNaN(x) ? NAN_S : Math.round(x * 100.0) / 100.0);
+            ev.put(r);
+        }
+        o.put("events", ev);
         JSONArray a = new JSONArray();
         for (int m = 0; m < NUM_MODES; m++) {
             JSONArray row = new JSONArray();
@@ -521,11 +620,26 @@ public final class TripSession {
         if (wa != null) for (int i = 0; i < wa.length(); i++) {
             JSONArray r = wa.getJSONArray(i);
             float[] w = new float[W_LEN];
+            java.util.Arrays.fill(w, Float.NaN);
             for (int k = 0; k < W_LEN && k < r.length(); k++) {
                 double x = r.getDouble(k);
                 w[k] = x <= -998 ? Float.NaN : (float) x;
             }
             s.wins.add(w);
+        }
+        s.activeMs = o.optLong("activeMs");
+        s.rpmSum = o.optDouble("rpmSum", 0); s.rpmMs = o.optLong("rpmMs"); s.rpmMax = (float) o.optDouble("rpmMax", 0);
+        s.regenSum = o.optDouble("regenSum", 0); s.regenMs = o.optLong("regenMs");
+        s.cabinSum = o.optDouble("cabinSum", 0); s.cabinMs = o.optLong("cabinMs");
+        s.packSum = o.optDouble("packSum", 0); s.packMs = o.optLong("packMs");
+        s.coolSum = o.optDouble("coolSum", 0); s.coolMs = o.optLong("coolMs"); s.acMs = o.optLong("acMs");
+        s.packMax = getF(o, "packMax");
+        JSONArray evs = o.optJSONArray("events");
+        if (evs != null) for (int i = 0; i < evs.length(); i++) {
+            JSONArray r = evs.getJSONArray(i);
+            float[] e = new float[5];
+            for (int k = 0; k < 5 && k < r.length(); k++) { double x = r.getDouble(k); e[k] = x <= -998 ? Float.NaN : (float) x; }
+            s.events.add(e);
         }
         JSONArray a = o.getJSONArray("cells");
         for (int m = 0; m < NUM_MODES && m < a.length(); m++) {

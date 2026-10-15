@@ -100,6 +100,8 @@ final class Updater {
         PackageInstaller.SessionParams params =
                 new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
         params.setAppPackageName(ctx.getPackageName());
+        // Android 12+: تحديث بلا سؤال المستخدم إن كان هذا التطبيق هو من ثبّت نفسه (وإلا يظهر زر التحديث المعتاد)
+        if (Build.VERSION.SDK_INT >= 31) params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED);
         int id = pi.createSession(params);
         PackageInstaller.Session session = pi.openSession(id);
         try {
@@ -130,6 +132,26 @@ final class Updater {
             session.abandon();
             throw e;
         }
+    }
+
+    private static final long CHECK_EVERY_MS = 6L * 3600 * 1000;
+
+    /**
+     * تحديث تلقائي بلا تدخل: يُستدعى والسيارة مطفأة أو التطبيق خامل (لا رحلة جارية).
+     * يفحص مرة كل 6 ساعات كحد أقصى، ويحتاج صلاحية «تثبيت التطبيقات» الممنوحة مسبقاً.
+     */
+    static boolean autoUpdateIfNeeded(Context ctx) throws Exception {
+        if (!Settings.autoUpdate(ctx)) return false;
+        init(ctx);
+        if (OWNER.isEmpty()) return false;
+        long now = System.currentTimeMillis();
+        if (now - Settings.p(ctx).getLong(Settings.K_LAST_UPDATE_CHECK, 0) < CHECK_EVERY_MS) return false;
+        Settings.p(ctx).edit().putLong(Settings.K_LAST_UPDATE_CHECK, now).apply();
+        if (!ctx.getPackageManager().canRequestPackageInstalls()) return false;
+        Info i = fetchLatest();
+        if (i == null || i.code <= installedCode(ctx)) return false;
+        downloadAndInstall(ctx, i, (done, total) -> { });
+        return true;
     }
 
     private static HttpURLConnection open(String url) throws IOException {

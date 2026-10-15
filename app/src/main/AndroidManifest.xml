@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES"/>
 
     <!-- تُستخدم فقط في المسار الاحتياطي (CarPropertyManager القياسي) -->
     <uses-permission android:name="android.car.permission.CAR_SPEED"/>
@@ -38,6 +39,12 @@
         <activity android:name=".AnalyzeActivity" android:exported="false" android:theme="@style/FloatingTheme"/>
 
         <activity android:name=".DashboardActivity" android:exported="false" android:theme="@style/FloatingTheme"/>
+
+        <activity android:name=".SettingsActivity" android:exported="false" android:theme="@style/FloatingTheme"/>
+
+        <!-- مشاركة ملفات التصدير (PDF / Excel) مع التطبيقات الأخرى، قراءة فقط -->
+        <provider android:name=".ExportProvider" android:authorities="${applicationId}.exports"
+            android:exported="false" android:grantUriPermissions="true"/>
 
         <service android:name=".TripService" android:exported="false"/>
 
