@@ -58,9 +58,8 @@ final class StorageMonitor {
         PendingIntent pi = PendingIntent.getActivity(c, 3, new Intent(c, SettingsActivity.class), PendingIntent.FLAG_IMMUTABLE);
         Notification n = new Notification.Builder(c, ALERT_CH)
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle("Trip storage limit exceeded")
-                .setContentText("Trip files use " + human(used) + " (limit " + Settings.storageLimitMb(c)
-                        + " MB). Export or delete old trips.")
+                .setContentTitle(Tr.t("Trip storage limit exceeded"))
+                .setContentText(Tr.f("Trip files use %s (limit %s MB). Export or delete old trips.", human(used), Settings.storageLimitMb(c)))
                 .setContentIntent(pi)
                 .setAutoCancel(true)
                 .build();

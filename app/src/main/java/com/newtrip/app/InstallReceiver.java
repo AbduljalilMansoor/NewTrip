@@ -19,7 +19,7 @@ public class InstallReceiver extends BroadcastReceiver {
             }
         } else if (status != PackageInstaller.STATUS_SUCCESS) {
             String msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
-            Toast.makeText(ctx, "فشل التحديث: " + msg, Toast.LENGTH_LONG).show();
+            Toast.makeText(ctx, Tr.f("Update failed: %s", msg), Toast.LENGTH_LONG).show();
         }
     }
 }

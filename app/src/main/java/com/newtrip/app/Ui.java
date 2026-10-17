@@ -31,7 +31,7 @@ final class Ui {
 
     static TextView text(Context c, String s, float sp, int color, boolean bold) {
         TextView t = new TextView(c);
-        t.setText(s);
+        t.setText(Tr.t(s));
         t.setTextSize(sp);
         t.setTextColor(color);
         if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);

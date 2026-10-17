@@ -126,6 +126,8 @@ public final class TripSession {
     }
 
     public long startWall, endWall;
+    /** معرّف ثابت للرحلة (للمزامنة السحابية دون تكرار). الرحلات القديمة: "legacy-<وقت البداية>". */
+    public String id = java.util.UUID.randomUUID().toString();
     public boolean active;
     /** true = القيمة السالبة لقدرة البطارية تعني شحناً (الافتراضي في DisplayMirror). */
     public boolean negIsIn = true;
@@ -522,7 +524,7 @@ public final class TripSession {
     // ---------- JSON ----------
     public synchronized JSONObject toJson() throws JSONException {
         JSONObject o = new JSONObject();
-        o.put("v", 2).put("start", startWall).put("end", endWall).put("active", active).put("negIsIn", negIsIn);
+        o.put("v", 2).put("id", id).put("start", startWall).put("end", endWall).put("active", active).put("negIsIn", negIsIn);
         putF(o, "socStart", socStart); putF(o, "socEnd", socEnd);
         putF(o, "fuelStart", fuelStart); putF(o, "fuelEnd", fuelEnd);
         putF(o, "odoStart", odoStart); putF(o, "odoEnd", odoEnd);
@@ -589,6 +591,7 @@ public final class TripSession {
         s.startWall = o.getLong("start");
         s.endWall = o.optLong("end");
         s.active = o.optBoolean("active");
+        s.id = o.optString("id", "legacy-" + o.optLong("start"));
         s.negIsIn = o.optBoolean("negIsIn", true);
         s.socStart = getF(o, "socStart"); s.socEnd = getF(o, "socEnd");
         s.fuelStart = getF(o, "fuelStart"); s.fuelEnd = getF(o, "fuelEnd");

@@ -69,7 +69,7 @@ final class HeatmapView extends View {
     protected void onDraw(Canvas c) {
         if (h == null || h.rows.length == 0 || !h.any) {
             p.setColor(Ui.MUTED); p.setTextSize(15 * d);
-            c.drawText("Not enough data for this map", getWidth() / 2f, getHeight() / 2f, p);
+            c.drawText(Tr.t("Not enough data for this map"), getWidth() / 2f, getHeight() / 2f, p);
             return;
         }
         int nc = h.cols.length, nr = h.rows.length;

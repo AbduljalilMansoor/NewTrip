@@ -26,7 +26,7 @@ final class BarsView extends View {
         p.setTextAlign(Paint.Align.CENTER);
         if (b == null || b.label.length == 0) {
             p.setColor(Ui.MUTED); p.setTextSize(15 * d);
-            c.drawText("No data for these filters", getWidth() / 2f, getHeight() / 2f, p);
+            c.drawText(Tr.t("No data for these filters"), getWidth() / 2f, getHeight() / 2f, p);
             return;
         }
         int n = b.label.length;

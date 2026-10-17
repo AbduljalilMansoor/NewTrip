@@ -154,11 +154,11 @@ final class DashModel {
         String[] rows, cols; double[][] val; String[][] tip; String unit; boolean cost; boolean any;
     }
 
-    private static String speedLabel(int b) {
+    static String speedLabel(int b) {
         return b >= TripSession.SPEED_BINS - 1 ? "130+" : (b * 10) + "–" + (b * 10 + 10);
     }
 
-    private static int tempBand(double t) { return t < 25 ? 0 : t < 35 ? 1 : t < 42 ? 2 : 3; }
+    static int tempBand(double t) { return t < 25 ? 0 : t < 35 ? 1 : t < 42 ? 2 : 3; }
 
     Heat heat(int type, int metric) {
         int nr = TripSession.SPEED_BINS;
@@ -207,8 +207,8 @@ final class DashModel {
         int rows = last - first + 1;
         h.rows = new String[rows]; h.cols = new String[nc]; h.val = new double[rows][nc]; h.tip = new String[rows][nc];
         for (int c = 0; c < nc; c++) {
-            h.cols[c] = type == 0 ? TripSession.ACCEL_NAMES[c]
-                    : type == 1 ? (c * 10) + "–" + (c * 10 + 10) + "%" : TEMP[c + 1];
+            h.cols[c] = type == 0 ? Tr.t(TripSession.ACCEL_NAMES[c])
+                    : type == 1 ? (c * 10) + "–" + (c * 10 + 10) + "%" : Tr.t(TEMP[c + 1]);
         }
         for (int r = 0; r < rows; r++) {
             h.rows[r] = speedLabel(first + r);
@@ -221,9 +221,8 @@ final class DashModel {
                 else if (metric == 3 && x.dur > 0 && totDur > 0) v = x.dur / totDur * 100;
                 h.val[r][c] = v;
                 if (!Double.isNaN(v)) h.any = true;
-                h.tip[r][c] = x.dur <= 0 ? "No data" : h.rows[r] + " km/h  ×  " + h.cols[c] + "\n"
-                        + f(x.dist, 1) + " km  ·  " + f(x.dur / 60, 1) + " min  ·  fuel " + f(x.fuel, 2)
-                        + " L  ·  battery " + f(x.out - x.in, 2) + " kWh net  ·  engine on " + f(x.eng / x.dur * 100, 0) + "%";
+                h.tip[r][c] = x.dur <= 0 ? Tr.t("No data") : Tr.f("%s km/h  ×  %s\n%s km  ·  %s min  ·  fuel %s L  ·  battery %s kWh net  ·  engine on %s%%",
+                        h.rows[r], h.cols[c], f(x.dist, 1), f(x.dur / 60, 1), f(x.fuel, 2), f(x.out - x.in, 2), f(x.eng / x.dur * 100, 0));
             }
         }
         return h;
@@ -277,21 +276,22 @@ final class DashModel {
             s.x[i] = v.get(i)[0]; s.y[i] = v.get(i)[1]; s.size[i] = v.get(i)[2];
             s.color[i] = col.get(i); s.ref[i] = ref.get(i);
         }
-        s.legend = ci == 0 ? new String[]{"Smart", "Forced", "Mixed"}
+        s.legend = Tr.all(ci == 0 ? new String[]{"Smart", "Forced", "Mixed"}
                 : ci == 1 ? new String[]{"Hybrid", "Electric", "Mixed"}
-                : ci == 2 ? MODE_NAMES : new String[]{"Trips"};
+                : ci == 2 ? MODE_NAMES : new String[]{"Trips"});
         return s;
     }
 
     String tripTip(int ptIndex) {
         Pt p = pts.get(ptIndex);
         TripSession s = p.s;
-        return Ui.date(s.startWall) + "\n" + f(p.dist, 1) + " km  ·  " + f(p.avgSpeed(), 0) + " km/h\n"
-                + s.driveType() + "  ·  " + s.socModeLabel() + (s.targetLabel().equals("—") ? "" : "  ·  " + s.targetLabel()) + "\n"
-                + "Fuel " + f(p.fuel, 2) + " L (" + f(yval(p, 0), 1) + " L/100km)  ·  Battery " + f(p.out - p.in, 1) + " kWh net\n"
-                + "EV share " + f(p.evShare(), 0) + "%  ·  Temp " + f(p.temp, 0) + " °C"
-                + (Float.isNaN(s.carAvgFuel) && Float.isNaN(s.carAvgEnergy) ? ""
-                : "\nCar-reported averages: " + f(s.carAvgFuel, 1) + " L/100km  ·  " + f(s.carAvgEnergy, 1) + " kWh/100km");
+        String tgt = s.targetLabel().equals("—") ? "" : "  ·  " + s.targetLabel();
+        String car = Float.isNaN(s.carAvgFuel) && Float.isNaN(s.carAvgEnergy) ? ""
+                : "\n" + Tr.f("Car-reported averages: %s L/100km  ·  %s kWh/100km", f(s.carAvgFuel, 1), f(s.carAvgEnergy, 1));
+        return Ui.date(s.startWall) + "\n" + Tr.f("%s km  ·  %s km/h", f(p.dist, 1), f(p.avgSpeed(), 0)) + "\n"
+                + Tr.t(s.driveType()) + "  ·  " + Tr.t(s.socModeLabel()) + tgt + "\n"
+                + Tr.f("Fuel %s L (%s L/100km)  ·  Battery %s kWh net", f(p.fuel, 2), f(yval(p, 0), 1), f(p.out - p.in, 1)) + "\n"
+                + Tr.f("EV share %s%%  ·  Temp %s °C", f(p.evShare(), 0), f(p.temp, 0)) + car;
     }
 
     Scat winScatter(int xi, int yi, int ci) {
@@ -324,23 +324,23 @@ final class DashModel {
         Scat s = new Scat();
         s.x = java.util.Arrays.copyOf(x, n); s.y = java.util.Arrays.copyOf(y, n); s.size = java.util.Arrays.copyOf(sz, n);
         s.color = java.util.Arrays.copyOf(c, n); s.ref = java.util.Arrays.copyOf(ref, n);
-        s.legend = ci == 0 ? new String[]{"EV (engine off)", "Engine on"} : ci == 1 ? new String[]{"Smart", "Forced"} : MODE_NAMES;
+        s.legend = Tr.all(ci == 0 ? new String[]{"EV (engine off)", "Engine on"} : ci == 1 ? new String[]{"Smart", "Forced"} : MODE_NAMES);
         return s;
     }
 
     String winTip(int i) {
         float[] w = wins.get(i);
         double hrs = w[TripSession.W_DUR] / 3600.0;
-        return Ui.date(winTrip.get(i).startWall + (long) (w[TripSession.W_T] * 1000)) + "  ·  " + MODE_NAMES[(int) w[TripSession.W_MODE]] + "\n"
-                + f(w[TripSession.W_SPD], 0) + " km/h  ·  battery " + f(w[TripSession.W_SOC], 0) + "%  ·  " + f(w[TripSession.W_TEMP], 0) + " °C\n"
-                + "Net " + f((w[TripSession.W_OUT] - w[TripSession.W_IN]) / hrs, 1) + " kW  ·  fuel " + f(w[TripSession.W_FUEL] / hrs, 1) + " L/h  ·  peak "
-                + f(w[TripSession.W_MAXKW], 0) + " kW";
+        return Ui.date(winTrip.get(i).startWall + (long) (w[TripSession.W_T] * 1000)) + "  ·  " + Tr.t(MODE_NAMES[(int) w[TripSession.W_MODE]]) + "\n"
+                + Tr.f("%s km/h  ·  battery %s%%  ·  %s °C", f(w[TripSession.W_SPD], 0), f(w[TripSession.W_SOC], 0), f(w[TripSession.W_TEMP], 0)) + "\n"
+                + Tr.f("Net %s kW  ·  fuel %s L/h  ·  peak %s kW", f((w[TripSession.W_OUT] - w[TripSession.W_IN]) / hrs, 1),
+                        f(w[TripSession.W_FUEL] / hrs, 1), f(w[TripSession.W_MAXKW], 0));
     }
 
     // ------------------------------------------------------------ أعمدة مجمّعة (من النوافذ)
     static final class Bars { String[] label; double[] val; double[] dist; String unit; }
 
-    private static int snapTarget(float t) {
+    static int snapTarget(float t) {
         if (Float.isNaN(t)) return -1;
         int best = 0; float bd = 999;
         for (int i = 1; i < TARGET_V.length; i++) { float d = Math.abs(TARGET_V[i] - t); if (d < bd) { bd = d; best = i; } }
@@ -381,7 +381,7 @@ final class DashModel {
             else if (metric == 2) v = (x.fuel * KWH_PER_L + x.out - x.in) / x.dist * 100;
             else if (metric == 3) v = (x.dur - x.eng) / x.dur * 100;
             else v = x.dist;
-            L.add(names[i]); V.add(v); D.add(x.dist);
+            L.add(Tr.t(names[i])); V.add(v); D.add(x.dist);
         }
         b.label = L.toArray(new String[0]);
         b.val = new double[V.size()]; b.dist = new double[V.size()];
@@ -390,12 +390,15 @@ final class DashModel {
     }
 
     // ------------------------------------------------------------ ملاحظات تلقائية
+    /** تنبيه يُعرض مرة واحدة أسفل كل بطاقة نصائح. */
+    static final String DISCLAIMER = "These are patterns in your own trips, not controlled tests; they firm up as you record more trips in each condition.";
+
     List<String> insights() {
         List<String> out = new ArrayList<>();
-        if (pts.isEmpty()) { out.add("No trips match these filters."); return out; }
+        if (pts.isEmpty()) { out.add(Tr.t("No trips match these filters.")); return out; }
         Kpi k = kpi();
         if (tripsNoDetail > 0)
-            out.add("ℹ " + tripsNoDetail + " of " + k.trips + " trips were recorded before detailed logging; maps and operating-point charts use only newer trips.");
+            out.add("ℹ " + Tr.f("%s of %s trips were recorded before detailed logging; maps and operating-point charts use only newer trips.", tripsNoDetail, k.trips));
 
         // 1) أفضل/أسوأ سرعة بالطاقة المكافئة (شبكة السرعة)
         double[] dist = new double[TripSession.SPEED_BINS], eq = new double[TripSession.SPEED_BINS];
@@ -415,10 +418,10 @@ final class DashModel {
             if (worst < 0 || v > eq[worst] / dist[worst]) worst = i;
         }
         if (best >= 0 && worst >= 0 && best != worst)
-            out.add("⚡ Most efficient speed: " + speedLabel(best) + " km/h at " + f(eq[best] / dist[best] * 100, 1)
-                    + " kWh-eq/100km; least efficient: " + speedLabel(worst) + " km/h at " + f(eq[worst] / dist[worst] * 100, 1) + ".");
+            out.add("⚡ " + Tr.f("Most efficient speed: %s km/h at %s kWh-eq/100km; least efficient: %s km/h at %s.",
+                    speedLabel(best), f(eq[best] / dist[best] * 100, 1), speedLabel(worst), f(eq[worst] / dist[worst] * 100, 1)));
 
-        // 2) أثر التسارع على الوقود
+        // 2) أثر التسارع على الوقود (يُخفى إن لم تُسجَّل تسارعات تُذكر)
         double fuelAcc = 0, fuelAll = 0, tAcc = 0, tAll = 0;
         for (TripSession s : trips)
             for (int m = 0; m < TripSession.NUM_MODES; m++) {
@@ -429,9 +432,9 @@ final class DashModel {
                     if (ab >= 3) { fuelAcc += g.fuel; tAcc += g.durMs; }
                 }
             }
-        if (fuelAll > 0.3 && tAll > 0)
-            out.add("🚀 " + f(fuelAcc / fuelAll * 100, 0) + "% of fuel is burned while accelerating, which is only "
-                    + f(tAcc / tAll * 100, 0) + "% of driving time.");
+        if (fuelAll > 0.3 && tAll > 0 && tAcc / tAll >= 0.01)
+            out.add("🚀 " + Tr.f("%s%% of fuel is burned while accelerating, which is only %s%% of driving time.",
+                    f(fuelAcc / fuelAll * 100, 0), f(tAcc / tAll * 100, 0)));
 
         // 3) Smart مقابل Forced (من النوافذ)
         Acc sm = new Acc(), fo = new Acc();
@@ -442,11 +445,13 @@ final class DashModel {
         if (sm.dist >= 3 && fo.dist >= 3) {
             double a = (sm.fuel * KWH_PER_L + sm.out - sm.in) / sm.dist * 100, b = (fo.fuel * KWH_PER_L + fo.out - fo.in) / fo.dist * 100;
             double fs = sm.fuel / sm.dist * 100, ff = fo.fuel / fo.dist * 100;
-            out.add("🔋 Forced Power Saving: " + f(ff, 1) + " L/100km vs Smart: " + f(fs, 1) + " L/100km ("
-                    + (b >= a ? "+" : "") + f((b - a) / a * 100, 0) + "% total energy; Forced " + f(fo.dist, 0) + " km, Smart " + f(sm.dist, 0) + " km).");
+            out.add("🔋 " + Tr.f(b >= a
+                            ? "Forced Power Saving: %s L/100km vs Smart: %s L/100km (%s%% more total energy; Forced %s km, Smart %s km)."
+                            : "Forced Power Saving: %s L/100km vs Smart: %s L/100km (%s%% less total energy; Forced %s km, Smart %s km).",
+                    f(ff, 1), f(fs, 1), f(Math.abs((b - a) / a * 100), 0), f(fo.dist, 0), f(sm.dist, 0)));
         }
 
-        // 4) الحرارة والمكيف
+        // 4) الحرارة والمكيف (صياغة حسب اتجاه الفرق)
         Acc cool = new Acc(), hot = new Acc(), acOn = new Acc(), acOff = new Acc();
         for (float[] w : wins) {
             float t = w[TripSession.W_TEMP];
@@ -456,21 +461,25 @@ final class DashModel {
         }
         if (cool.dist >= 3 && hot.dist >= 3) {
             double a = (cool.fuel * KWH_PER_L + cool.out - cool.in) / cool.dist * 100, b = (hot.fuel * KWH_PER_L + hot.out - hot.in) / hot.dist * 100;
-            out.add("🌡 Above 38 °C total energy use is " + (b >= a ? "+" : "") + f((b - a) / a * 100, 0) + "% vs below 30 °C ("
-                    + f(b, 1) + " vs " + f(a, 1) + " kWh-eq/100km).");
+            double pen = a > 0 ? (b - a) / a * 100 : 0;
+            if (pen >= 3) out.add("🌡 " + Tr.f("Above 38 °C total energy use is %s%% higher than below 30 °C (%s vs %s kWh-eq/100km).", f(pen, 0), f(b, 1), f(a, 1)));
+            else if (pen <= -3) out.add("🌡 " + Tr.f("Hot trips (above 38 °C) did not cost more energy than cool ones (%s%% lower: %s vs %s kWh-eq/100km); speed and driving mode probably outweigh temperature in your data.", f(-pen, 0), f(b, 1), f(a, 1)));
+            else out.add("🌡 " + Tr.f("Outside temperature has no measurable effect on energy use in your data (%s vs %s kWh-eq/100km).", f(b, 1), f(a, 1)));
         }
         if (acOn.dist >= 3 && acOff.dist >= 3) {
             double a = (acOff.fuel * KWH_PER_L + acOff.out - acOff.in) / acOff.dist * 100, b = (acOn.fuel * KWH_PER_L + acOn.out - acOn.in) / acOn.dist * 100;
-            out.add("❄ With A/C on: " + f(b, 1) + " kWh-eq/100km vs " + f(a, 1) + " with A/C off (" + (b >= a ? "+" : "") + f((b - a) / a * 100, 0) + "%).");
+            double pen = a > 0 ? (b - a) / a * 100 : 0;
+            if (pen >= 3) out.add("❄ " + Tr.f("With A/C on: %s kWh-eq/100km vs %s with A/C off (%s%% more).", f(b, 1), f(a, 1), f(pen, 0)));
+            else if (pen <= -3) out.add("❄ " + Tr.f("Trips with A/C on were not more expensive (%s%% lower: %s vs %s kWh-eq/100km); other factors outweigh A/C in your data.", f(-pen, 0), f(b, 1), f(a, 1)));
+            else out.add("❄ " + Tr.f("A/C has no measurable effect on energy use in your data (%s vs %s kWh-eq/100km).", f(b, 1), f(a, 1)));
         }
 
         // 5) أفضل رحلة
         Pt bestT = null;
         for (Pt p : pts) if (p.dist >= 5 && !Double.isNaN(p.energyEq100()) && (bestT == null || p.energyEq100() < bestT.energyEq100())) bestT = p;
         if (bestT != null)
-            out.add("🏆 Best trip: " + Ui.date(bestT.s.startWall) + ", " + f(bestT.dist, 1) + " km at " + f(bestT.energyEq100(), 1)
-                    + " kWh-eq/100km (" + bestT.s.driveType() + ", " + bestT.s.socModeLabel() + ").");
-        out.add("These are correlations in your own trips (not controlled tests); more trips in each condition make them more reliable.");
+            out.add("🏆 " + Tr.f("Best trip: %s, %s km at %s kWh-eq/100km (%s, %s).", Ui.date(bestT.s.startWall), f(bestT.dist, 1), f(bestT.energyEq100(), 1),
+                    Tr.t(bestT.s.driveType()), Tr.t(bestT.s.socModeLabel())));
         return out;
     }
 
@@ -485,14 +494,14 @@ final class DashModel {
     static final String[] FMETRIC = {"Fuel flow (L/h)", "Fuel (L/100km)"};
     static final String[] MSMETRIC = {"Fuel (L/100km)", "Energy-eq (kWh/100km)", "Avg RPM"};
 
-    private static int socBand(float soc) { return Math.max(0, Math.min(4, (int) (soc / 20f))); }
-    private static int distBand(double d) { return d < 10 ? 0 : d < 30 ? 1 : d < 60 ? 2 : 3; }
-    private static int deficitBand(double d) { return d <= 0 ? 0 : d <= 15 ? 1 : d <= 30 ? 2 : d <= 45 ? 3 : 4; }
-    private static int spdBand(float v) { return v < 30 ? 0 : v < 60 ? 1 : v < 90 ? 2 : v < 120 ? 3 : 4; }
-    private static int rpmBand(float r) { return Float.isNaN(r) ? 0 : r < 1500 ? 1 : r < 2500 ? 2 : r < 3500 ? 3 : 4; }
+    static int socBand(float soc) { return Math.max(0, Math.min(4, (int) (soc / 20f))); }
+    static int distBand(double d) { return d < 10 ? 0 : d < 30 ? 1 : d < 60 ? 2 : 3; }
+    static int deficitBand(double d) { return d <= 0 ? 0 : d <= 15 ? 1 : d <= 30 ? 2 : d <= 45 ? 3 : 4; }
+    static int spdBand(float v) { return v < 30 ? 0 : v < 60 ? 1 : v < 90 ? 2 : v < 120 ? 3 : 4; }
+    static int rpmBand(float r) { return Float.isNaN(r) ? 0 : r < 1500 ? 1 : r < 2500 ? 2 : r < 3500 ? 3 : 4; }
 
     /** رقم إعداد SOC لنافذة: 0 = Smart ، 1..4 = Forced بهدف 25/40/55/70 ، 5 = Forced بلا هدف معروف. */
-    private static int setIndex(float[] w) {
+    static int setIndex(float[] w) {
         if (w[TripSession.W_FORCED] <= 0.5f) return 0;
         int k = snapTarget(w[TripSession.W_TARGET]);
         return k < 1 ? 5 : k;
@@ -509,33 +518,33 @@ final class DashModel {
             for (int c = 0; c < cn.length; c++) if (a[r][c].n > 0) any = true;
             if (any || !skipEmptyRows) keep.add(r);
         }
-        h.cols = cn;
+        h.cols = Tr.all(cn);
         h.rows = new String[keep.size()];
         h.val = new double[keep.size()][cn.length];
         h.tip = new String[keep.size()][cn.length];
         for (int i = 0; i < keep.size(); i++) {
             int r = keep.get(i);
-            h.rows[i] = rn[r];
+            h.rows[i] = Tr.t(rn[r]);
             for (int c = 0; c < cn.length; c++) {
                 Acc x = a[r][c];
                 double v = x.n > 0 ? val.of(x) : Double.NaN;
                 h.val[i][c] = v;
                 if (!Double.isNaN(v)) h.any = true;
-                h.tip[i][c] = x.n == 0 ? "No data" : rn[r] + "  ×  " + cn[c] + "\n" + x.n + " " + unitsTip + "  ·  "
-                        + f(x.dist, 1) + " km  ·  " + f(x.dur / 60, 1) + " min  ·  fuel " + f(x.fuel, 2) + " L"
-                        + (x.rpmD > 0 ? "  ·  avg RPM " + f(x.rpmW / x.rpmD, 0) : "");
+                h.tip[i][c] = x.n == 0 ? Tr.t("No data") : Tr.t(rn[r]) + "  ×  " + Tr.t(cn[c]) + "\n" + x.n + " " + Tr.t(unitsTip) + "  ·  "
+                        + Tr.f("%s km  ·  %s min  ·  fuel %s L", f(x.dist, 1), f(x.dur / 60, 1), f(x.fuel, 2))
+                        + (x.rpmD > 0 ? "  ·  " + Tr.f("avg RPM %s", f(x.rpmW / x.rpmD, 0)) : "");
             }
         }
         return h;
     }
 
-    private static Acc[][] accGrid(int r, int c) {
+    static Acc[][] accGrid(int r, int c) {
         Acc[][] a = new Acc[r][c];
         for (Acc[] row : a) for (int j = 0; j < c; j++) row[j] = new Acc();
         return a;
     }
 
-    private static void addWin(Acc x, float[] w) {
+    static void addWin(Acc x, float[] w) {
         x.n++;
         x.dur += w[TripSession.W_DUR]; x.eng += w[TripSession.W_ENG]; x.dist += w[TripSession.W_DIST];
         x.out += w[TripSession.W_OUT]; x.in += w[TripSession.W_IN]; x.fuel += w[TripSession.W_FUEL];
@@ -577,7 +586,7 @@ final class DashModel {
         for (int i = 0; i < m; i++) {
             s.x[i] = v.get(i)[0]; s.y[i] = v.get(i)[1]; s.size[i] = v.get(i)[2]; s.color[i] = col.get(i); s.ref[i] = ref.get(i);
         }
-        s.legend = new String[]{"Smart", "Forced", "Mixed"};
+        s.legend = Tr.all(new String[]{"Smart", "Forced", "Mixed"});
         return s;
     }
 
@@ -681,20 +690,18 @@ final class DashModel {
     // ---- 7) ملاحظات PHEV ----
     List<String> phevInsights() {
         List<String> out = new ArrayList<>();
-        if (pts.isEmpty()) { out.add("No trips match these filters."); return out; }
+        if (pts.isEmpty()) { out.add(Tr.t("No trips match these filters.")); return out; }
         startSocScatter();
         Trend tr = trend;
         if (tr.ok && Math.abs(tr.r) >= 0.3) {
             double per10 = tr.slope * 10;
-            out.add(per10 < 0
-                    ? "🔋 Starting with more battery saves fuel: every +10% of battery at trip start ≈ " + f(-per10, 1)
-                        + " L/100km less (r = " + f(tr.r, 2) + ", " + tr.n + " trips)."
-                    : "🔋 In your data, a fuller battery at the start did NOT lower fuel use (+10% ≈ +" + f(per10, 1)
-                        + " L/100km, r = " + f(tr.r, 2) + "). Trip length or Forced mode may be hiding the effect.");
+            out.add("🔋 " + (per10 < 0
+                    ? Tr.f("Starting with more battery saves fuel: every +10%% of battery at trip start ≈ %s L/100km less (r = %s, %s trips).", f(-per10, 1), f(tr.r, 2), tr.n)
+                    : Tr.f("In your data, a fuller battery at the start did NOT lower fuel use (+10%% ≈ +%s L/100km, r = %s). Trip length or Forced mode may be hiding the effect.", f(per10, 1), f(tr.r, 2))));
         } else if (tr.n >= 4) {
-            out.add("🔋 No clear link between starting battery and fuel use yet (" + tr.n + " trips). Distance and SOC mode also matter; see the map below.");
+            out.add("🔋 " + Tr.f("No clear link between starting battery and fuel use yet (%s trips). Distance and SOC mode also matter; see the map below.", tr.n));
         } else {
-            out.add("🔋 Need at least 4 trips with a start battery level to measure its effect on fuel.");
+            out.add("🔋 " + Tr.t("Need at least 4 trips with a start battery level to measure its effect on fuel."));
         }
 
         // مقارنة أعلى وأدنى شريحة بداية
@@ -705,8 +712,8 @@ final class DashModel {
         for (int i = 0; i < 5; i++) if (sb[i].n >= 2 && sb[i].dist >= 5) { if (lo < 0) lo = i; hi = i; }
         if (hi > lo && lo >= 0) {
             double a = sb[hi].fuel / sb[hi].dist * 100, b = sb[lo].fuel / sb[lo].dist * 100;
-            out.add("📊 Trips starting at " + SOC_BAND[hi] + " battery used " + f(a, 1) + " L/100km, versus " + f(b, 1)
-                    + " L/100km when starting at " + SOC_BAND[lo] + (b > 0 ? " (" + (a <= b ? "" : "+") + f((a - b) / b * 100, 0) + "%)." : "."));
+            out.add("📊 " + Tr.f("Trips starting at %s battery used %s L/100km, versus %s L/100km when starting at %s (%s%%).",
+                    SOC_BAND[hi], f(a, 1), f(b, 1), SOC_BAND[lo], b > 0 ? (a <= b ? "" : "+") + f((a - b) / b * 100, 0) : "—"));
         }
 
         // أثر المسافة
@@ -715,10 +722,13 @@ final class DashModel {
         for (Pt p : pts) { Acc x = db[distBand(p.s.totalDistKm())]; x.n++; x.dist += p.dist; x.fuel += p.fuel; }
         int dl = -1, dh = -1;
         for (int i = 0; i < 4; i++) if (db[i].n >= 2 && db[i].dist >= 5) { if (dl < 0) dl = i; dh = i; }
-        if (dh > dl && dl >= 0)
-            out.add("📏 " + DIST_BAND[dl] + " trips average " + f(db[dl].fuel / db[dl].dist * 100, 1) + " L/100km; "
-                    + DIST_BAND[dh] + " trips average " + f(db[dh].fuel / db[dh].dist * 100, 1) + " L/100km"
-                    + (db[dl].fuel / db[dl].dist < db[dh].fuel / db[dh].dist ? " (the battery covers more of a short trip)." : "."));
+        if (dh > dl && dl >= 0) {
+            boolean shortCheaper = db[dl].fuel / db[dl].dist < db[dh].fuel / db[dh].dist;
+            out.add("📏 " + Tr.f(shortCheaper
+                            ? "%s trips average %s L/100km; %s trips average %s L/100km (the battery covers more of a short trip)."
+                            : "%s trips average %s L/100km; %s trips average %s L/100km.",
+                    DIST_BAND[dl], f(db[dl].fuel / db[dl].dist * 100, 1), DIST_BAND[dh], f(db[dh].fuel / db[dh].dist * 100, 1)));
+        }
 
         // Forced: الفجوة بين الهدف والبطارية
         Acc near = new Acc(), far = new Acc(), farHi = new Acc(), farLo = new Acc();
@@ -737,13 +747,13 @@ final class DashModel {
         }
         if (near.dur >= 180 && far.dur >= 180) {
             double a = far.fuel / (far.dur / 3600.0), b = near.fuel / (near.dur / 3600.0);
-            out.add("⚡ In Forced mode, driving with the battery more than 30% below the target burned " + f(a, 1) + " L/h, versus "
-                    + f(b, 1) + " L/h when within 15% of the target" + (b > 0.05 ? " (" + f(a / b, 1) + "×)." : "."));
+            out.add("⚡ " + (b > 0.05
+                    ? Tr.f("In Forced mode, driving with the battery more than 30%% below the target burned %s L/h, versus %s L/h when within 15%% of the target (%s×).", f(a, 1), f(b, 1), f(a / b, 1))
+                    : Tr.f("In Forced mode, driving with the battery more than 30%% below the target burned %s L/h, versus %s L/h when within 15%% of the target.", f(a, 1), f(b, 1))));
         }
         if (farHi.dur >= 120 && farLo.dur >= 120) {
             double a = farHi.fuel / (farHi.dur / 3600.0), b = farLo.fuel / (farLo.dur / 3600.0);
-            out.add("🔥 With a large gap to target, engine speed above 3000 RPM burned " + f(a, 1) + " L/h versus " + f(b, 1)
-                    + " L/h below 2000 RPM. High speed + high RPM while charging is the most expensive combination.");
+            out.add("🔥 " + Tr.f("With a large gap to target, engine speed above 3000 RPM burned %s L/h versus %s L/h below 2000 RPM. High speed + high RPM while charging is the most expensive combination.", f(a, 1), f(b, 1)));
         }
 
         // توقيت بدء Forced
@@ -754,9 +764,9 @@ final class DashModel {
                 t += r.tMin; if (!Float.isNaN(r.soc)) { sc += r.soc; nt++; } if (!Float.isNaN(r.target)) tg += r.target;
                 if (!Float.isNaN(r.deficit) && r.deficit >= 30) big++;
             }
-            out.add("🕒 Forced charging was used in " + fr.size() + " trips; it started on average " + f(t / fr.size(), 0) + " min in, at "
-                    + (nt > 0 ? f(sc / nt, 0) : "—") + "% battery with a target of " + f(tg / fr.size(), 0) + "%"
-                    + (big > 0 ? ". In " + big + " of them the target was 30% or more above the battery level." : "."));
+            String base = Tr.f("Forced charging was used in %s trips; it started on average %s min in, at %s%% battery with a target of %s%%.",
+                    fr.size(), f(t / fr.size(), 0), nt > 0 ? f(sc / nt, 0) : "—", f(tg / fr.size(), 0));
+            out.add("🕒 " + base + (big > 0 ? " " + Tr.f("In %s of them the target was 30%% or more above the battery level.", big) : ""));
         }
 
         // أفضل/أسوأ مزيج (نمط × إعداد SOC)
@@ -774,9 +784,8 @@ final class DashModel {
             if (v > wv) { wv = v; wm = m; wsx = k; }
         }
         if (bm >= 0 && (bm != wm || bs != wsx))
-            out.add("🏁 Lowest fuel: " + MODE_NAMES[bm] + " + " + SET_NAMES[bs] + " at " + f(bv, 1) + " L/100km; highest: "
-                    + MODE_NAMES[wm] + " + " + SET_NAMES[wsx] + " at " + f(wv, 1) + " L/100km.");
-        out.add("These are patterns in your own trips, not controlled tests; they firm up as you record more trips in each condition.");
+            out.add("🏁 " + Tr.f("Lowest fuel: %s + %s at %s L/100km; highest: %s + %s at %s L/100km.",
+                    Tr.t(MODE_NAMES[bm]), Tr.t(SET_NAMES[bs]), f(bv, 1), Tr.t(MODE_NAMES[wm]), Tr.t(SET_NAMES[wsx]), f(wv, 1)));
         return out;
     }
 }

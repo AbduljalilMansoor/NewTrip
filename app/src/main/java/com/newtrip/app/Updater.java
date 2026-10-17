@@ -35,7 +35,7 @@ final class Updater {
 
     /** عنوان صفحة التثبيت على GitHub Pages، أو نص عام إن لم يُعرف المستودع. */
     static String installPage() {
-        return OWNER.isEmpty() ? "GitHub Pages لمستودعك" : OWNER.toLowerCase() + ".github.io/" + REPO;
+        return OWNER.isEmpty() ? "your repository GitHub Pages" : OWNER.toLowerCase() + ".github.io/" + REPO;
     }
     /** versionCode = 100 + رقم البناء في GitHub Actions (انظر app/build.gradle). */
     static final int CODE_BASE = 100;

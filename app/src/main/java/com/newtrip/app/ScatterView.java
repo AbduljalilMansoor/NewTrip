@@ -72,7 +72,7 @@ final class ScatterView extends View {
     protected void onDraw(Canvas c) {
         if (s == null || s.empty()) {
             p.setColor(Ui.MUTED); p.setTextSize(15 * d); p.setTextAlign(Paint.Align.CENTER);
-            c.drawText("No data for these filters", getWidth() / 2f, getHeight() / 2f, p);
+            c.drawText(Tr.t("No data for these filters"), getWidth() / 2f, getHeight() / 2f, p);
             return;
         }
         p.setTextSize(11 * d);
@@ -92,10 +92,10 @@ final class ScatterView extends View {
             c.drawText(tick(v, xs), x, getHeight() - B() + 16 * d, p);
         }
         p.setColor(Ui.TEXT); p.setTextAlign(Paint.Align.CENTER); p.setTextSize(12 * d);
-        c.drawText(xl, L() + (getWidth() - L() - R()) / 2, getHeight() - 6 * d, p);
+        c.drawText(Tr.t(xl), L() + (getWidth() - L() - R()) / 2, getHeight() - 6 * d, p);
         c.save();
         c.rotate(-90, 14 * d, T() + (getHeight() - T() - B()) / 2);
-        c.drawText(yl, 14 * d, T() + (getHeight() - T() - B()) / 2 + 4 * d, p);
+        c.drawText(Tr.t(yl), 14 * d, T() + (getHeight() - T() - B()) / 2 + 4 * d, p);
         c.restore();
 
         // خط الاتجاه

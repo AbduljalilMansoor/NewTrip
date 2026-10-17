@@ -21,6 +21,7 @@ final class UiScale {
 
     /** يُستدعى من attachBaseContext: يضبط كثافة الشاشة فتتغير كل وحدات dp/sp معاً (1.0 = بلا تغيير). */
     static Context wrap(Context base) {
+        Settings.applyLanguage(base);   // كل شاشة تمر من هنا فتُضبط اللغة قبل بناء الواجهة
         if (FACTOR == 1.0f) return base;
         Configuration c = new Configuration(base.getResources().getConfiguration());
         c.densityDpi = Math.round(c.densityDpi * FACTOR);

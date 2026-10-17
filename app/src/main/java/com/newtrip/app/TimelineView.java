@@ -82,14 +82,14 @@ final class TimelineView extends View {
     protected void onDraw(Canvas c) {
         if (tl == null || tl.empty()) {
             p.setColor(Ui.MUTED); p.setTextSize(15 * d); p.setTextAlign(Paint.Align.CENTER);
-            c.drawText("Pick a trip recorded after this update to see its timeline", getWidth() / 2f, getHeight() / 2f, p);
+            c.drawText(Tr.t("Pick a trip recorded after this update to see its timeline"), getWidth() / 2f, getHeight() / 2f, p);
             return;
         }
         int n = tl.t.length;
         float half = Math.max(0.15f, n > 1 ? (tl.t[1] - tl.t[0]) / 2f : 0.25f);
 
         // ---- المسار 1: البطارية والهدف و Forced ----
-        frame(c, 0, "Battery %   (orange band = Forced power saving, orange line = target)", 100, BLUE, "");
+        frame(c, 0, Tr.t("Battery %   (orange band = Forced power saving, orange line = target)"), 100, BLUE, "");
         float[] b0 = track(0);
         for (int i = 0; i < n; i++) {
             if (!tl.forced[i]) continue;
@@ -107,17 +107,17 @@ final class TimelineView extends View {
             float x = xOf(tl.evT[i]);
             p.setColor(tl.evForced[i] ? ORANGE : Ui.EV); p.setStrokeWidth(1.5f * d);
             c.drawLine(x, b0[0], x, b0[1], p);
-            String t = tl.evForced[i] ? "Forced ON" + (Float.isNaN(tl.evTarget[i]) ? "" : " → " + Ui.num(tl.evTarget[i], 0) + "%")
-                    + (Float.isNaN(tl.evSoc[i]) ? "" : " @ " + Ui.num(tl.evSoc[i], 0) + "%") : "Smart";
+            String t = tl.evForced[i] ? Tr.t("Forced ON") + (Float.isNaN(tl.evTarget[i]) ? "" : " → " + Ui.num(tl.evTarget[i], 0) + "%")
+                    + (Float.isNaN(tl.evSoc[i]) ? "" : " @ " + Ui.num(tl.evSoc[i], 0) + "%") : Tr.t("Smart");
             c.drawText(t, x + 4 * d, b0[0] + 13 * d + (i % 2) * 13 * d, p);
         }
 
         // ---- المسار 2: السرعة ----
-        frame(c, 1, "Speed km/h", spdMax, Ui.TEXT, "");
+        frame(c, 1, Tr.t("Speed km/h"), spdMax, Ui.TEXT, "");
         line(c, 1, tl.speed, 0, spdMax, 0xFFB0BEC5);
 
         // ---- المسار 3: RPM + الوقود ----
-        frame(c, 2, "Engine RPM (purple, left)   Fuel flow L/h (orange bars, right)", rpmMax, PURPLE, "");
+        frame(c, 2, Tr.t("Engine RPM (purple, left)   Fuel flow L/h (orange bars, right)"), rpmMax, PURPLE, "");
         float[] b2 = track(2);
         for (int i = 0; i < n; i++) {
             if (Float.isNaN(tl.fuelLph[i])) continue;
@@ -160,11 +160,11 @@ final class TimelineView extends View {
             }
             selected = best;
             invalidate();
-            cb.on(Ui.num(tl.t[best], 1) + " min   ·   battery " + Ui.num(tl.soc[best], 0) + "%"
-                    + (tl.forced[best] ? "   ·   Forced, target " + Ui.num(tl.target[best], 0) + "%" : "   ·   Smart")
+            cb.on(Tr.f("%s min   ·   battery %s%%", Ui.num(tl.t[best], 1), Ui.num(tl.soc[best], 0))
+                    + (tl.forced[best] ? "   ·   " + Tr.f("Forced, target %s%%", Ui.num(tl.target[best], 0)) : "   ·   " + Tr.t("Smart"))
                     + "   ·   " + Ui.num(tl.speed[best], 0) + " km/h"
-                    + "   ·   " + (Float.isNaN(tl.rpm[best]) ? "engine off" : Ui.num(tl.rpm[best], 0) + " RPM")
-                    + "   ·   fuel " + Ui.num(tl.fuelLph[best], 1) + " L/h");
+                    + "   ·   " + (Float.isNaN(tl.rpm[best]) ? Tr.t("engine off") : Ui.num(tl.rpm[best], 0) + " RPM")
+                    + "   ·   " + Tr.f("fuel %s L/h", Ui.num(tl.fuelLph[best], 1)));
         }
         return true;
     }

@@ -21,7 +21,7 @@ import java.util.List;
 public class SettingsActivity extends Activity {
     private static final int[] LIMITS_MB = {50, 100, 200, 500, 1000, 2000};
 
-    private LinearLayout storageBox;
+    private LinearLayout storageBox, tripModeBox, languageBox;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -77,26 +77,36 @@ public class SettingsActivity extends Activity {
         st.addView(lim);
         LinearLayout actions = Ui.row(this);
         actions.setPadding(0, Ui.dp(this, 10), 0, 0);
-        actions.addView(action("Export all trips (Excel)", Ui.EV, v -> exportAll()));
+        actions.addView(action("Export all trips (CSV)", Ui.EV, v -> exportAll()));
         actions.addView(action("Delete old trips…", Ui.CARD2, v -> deleteOld()));
         actions.addView(action("Clear exports", Ui.CARD2, v -> clearExports()));
         st.addView(actions);
         col.addView(st, cardLp());
 
-        // ---- الرحلات ----
+        // ---- تسجيل الرحلات ----
         LinearLayout tr = Ui.card(this);
-        tr.addView(Ui.text(this, "Trips", 20, Ui.TEXT, true));
-        tr.addView(Widgets.toggleRow(this, "End trip automatically when the car is switched off",
-                "Uses the car power state (OFF, or ACC for 90 s). A trip left open is also closed after a long gap.",
-                Settings.autoEnd(this), v -> Settings.setAutoEnd(this, v)));
+        tr.addView(Ui.text(this, "Trip recording", 20, Ui.TEXT, true));
+        tripModeBox = new LinearLayout(this);
+        tripModeBox.setOrientation(LinearLayout.VERTICAL);
+        tr.addView(tripModeBox);
+        renderTripMode();
         LinearLayout ex = Ui.row(this);
         ex.setGravity(Gravity.CENTER_VERTICAL);
         ex.setPadding(0, Ui.dp(this, 8), 0, 0);
         ex.addView(Ui.text(this, "Auto-export when a trip ends", 17, Ui.TEXT, true), new LinearLayout.LayoutParams(0, -2, 1f));
-        ex.addView(Widgets.spinner(this, new String[]{"Off", "PDF", "Excel"}, Settings.autoExport(this),
+        ex.addView(Widgets.spinner(this, new String[]{"Off", "PDF", "CSV"}, Settings.autoExport(this),
                 i -> Settings.setAutoExport(this, i)));
         tr.addView(ex);
         col.addView(tr, cardLp());
+
+        // ---- اللغة ----
+        LinearLayout lg = Ui.card(this);
+        lg.addView(Ui.text(this, "Language", 20, Ui.TEXT, true));
+        languageBox = new LinearLayout(this);
+        languageBox.setOrientation(LinearLayout.VERTICAL);
+        lg.addView(languageBox);
+        renderLanguage();
+        col.addView(lg, cardLp());
 
         // ---- التحديث ----
         LinearLayout up = Ui.card(this);
@@ -129,6 +139,72 @@ public class SettingsActivity extends Activity {
         refreshStorage();
     }
 
+    /** صف خيار (راديو): نقطة + عنوان + شرح. */
+    private View optionRow(String title, String sub, boolean selected, View.OnClickListener l) {
+        LinearLayout row = Ui.row(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        int pd = Ui.dp(this, 10);
+        row.setPadding(pd, pd, pd, pd);
+        row.setBackground(Ui.round(selected ? 0x3329B6F6 : 0x00000000, Ui.dp(this, 12)));
+        TextView dot = Ui.text(this, selected ? "●" : "○", 24, selected ? Ui.EV : Ui.MUTED, true);
+        dot.setPadding(0, 0, Ui.dp(this, 12), 0);
+        row.addView(dot);
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.addView(Ui.text(this, title, 17, Ui.TEXT, true));
+        if (sub != null) col.addView(Ui.text(this, sub, 13, Ui.MUTED, false));
+        row.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
+        row.setOnClickListener(l);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = Ui.dp(this, 4);
+        row.setLayoutParams(lp);
+        return row;
+    }
+
+    private void renderTripMode() {
+        tripModeBox.removeAllViews();
+        int mode = Settings.tripMode(this);
+        tripModeBox.addView(optionRow("Manual start (current)",
+                "You press Start. The trip ends when you press End, or automatically when the car is switched off.",
+                mode == Settings.MODE_MANUAL, v -> setTripMode(Settings.MODE_MANUAL)));
+        tripModeBox.addView(optionRow("Automatic start and end",
+                "A trip starts by itself when the car is on and moving, and ends when the car is switched off. You can still press Start or End yourself.",
+                mode == Settings.MODE_AUTO, v -> setTripMode(Settings.MODE_AUTO)));
+        if (mode == Settings.MODE_MANUAL) {
+            tripModeBox.addView(Widgets.toggleRow(this, "End trip automatically when the car is switched off",
+                    "Uses the car power state (OFF, or ACC for 90 s). A trip left open is also closed after a long gap.",
+                    Settings.autoEnd(this), v -> Settings.setAutoEnd(this, v)));
+        } else {
+            TextView n = Ui.text(this, "Automatic mode keeps a small notification running so it can notice when the car starts moving.", 13, Ui.MUTED, false);
+            n.setPadding(Ui.dp(this, 10), Ui.dp(this, 8), 0, 0);
+            tripModeBox.addView(n);
+        }
+    }
+
+    private void setTripMode(int mode) {
+        if (Settings.tripMode(this) == mode) return;
+        Settings.setTripMode(this, mode);
+        TripService.syncWithSettings(this);
+        renderTripMode();
+    }
+
+    private void renderLanguage() {
+        languageBox.removeAllViews();
+        int l = Settings.language(this);
+        String sys = Settings.systemLanguage();
+        String autoSub = sys == null ? "The car language could not be read, so please choose below."
+                : Tr.f("Detected from the car: %s", sys.equals("ar") ? "العربية" : "English");
+        languageBox.addView(optionRow("Automatic (car language)", autoSub, l == Settings.LANG_AUTO, v -> pickLanguage(Settings.LANG_AUTO)));
+        languageBox.addView(optionRow("English", null, l == Settings.LANG_EN, v -> pickLanguage(Settings.LANG_EN)));
+        languageBox.addView(optionRow("العربية", null, l == Settings.LANG_AR, v -> pickLanguage(Settings.LANG_AR)));
+    }
+
+    private void pickLanguage(int l) {
+        if (Settings.language(this) == l && l != Settings.LANG_AUTO) return;
+        Settings.setLanguage(this, l);
+        recreate();
+    }
+
     private LinearLayout.LayoutParams cardLp() {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
         lp.bottomMargin = Ui.dp(this, 12);
@@ -155,8 +231,8 @@ public class SettingsActivity extends Activity {
         long used = trips + exports;
         int n = store.history().size();
         boolean over = used > limit;
-        storageBox.addView(Ui.text(this, StorageMonitor.human(used) + " of " + Settings.storageLimitMb(this) + " MB   ("
-                + n + " trips " + StorageMonitor.human(trips) + ", exports " + StorageMonitor.human(exports) + ")",
+        storageBox.addView(Ui.text(this, Tr.f("%s of %s MB   (%s trips %s, exports %s)", StorageMonitor.human(used),
+                Settings.storageLimitMb(this), n, StorageMonitor.human(trips), StorageMonitor.human(exports)),
                 17, over ? Ui.BAD : Ui.TEXT, true));
         LinearLayout bar = Ui.row(this);
         bar.setBackground(Ui.round(Ui.CARD2, Ui.dp(this, 6)));
@@ -176,7 +252,7 @@ public class SettingsActivity extends Activity {
     }
 
     private void exportAll() {
-        Toast.makeText(this, "Exporting…", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, Tr.t("Exporting…"), Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
                 List<TripSession> all = new ArrayList<>();
@@ -184,11 +260,11 @@ public class SettingsActivity extends Activity {
                     TripSession s = SessionStore.read(f);
                     if (s != null) all.add(s);
                 }
-                if (all.isEmpty()) { runOnUiThread(() -> Toast.makeText(this, "No trips to export", Toast.LENGTH_LONG).show()); return; }
-                File out = Exporter.exportXlsx(this, all);
-                runOnUiThread(() -> { refreshStorage(); Exporter.offer(this, out, Exporter.MIME_XLSX); });
+                if (all.isEmpty()) { runOnUiThread(() -> Toast.makeText(this, Tr.t("No trips to export"), Toast.LENGTH_LONG).show()); return; }
+                List<File> out = Exporter.exportCsv(this, all);
+                runOnUiThread(() -> { refreshStorage(); Exporter.offer(this, out, Exporter.MIME_CSV); });
             } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(this, "Export failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                runOnUiThread(() -> Toast.makeText(this, Tr.f("Export failed: %s", e.getMessage()), Toast.LENGTH_LONG).show());
             }
         }, "export-all").start();
     }
@@ -196,20 +272,20 @@ public class SettingsActivity extends Activity {
     private void deleteOld() {
         final int[] days = {30, 90, 180, 365};
         new AlertDialog.Builder(this)
-                .setTitle("Delete trips older than")
-                .setItems(new String[]{"30 days", "90 days", "180 days", "1 year"}, (d, which) -> {
+                .setTitle(Tr.t("Delete trips older than"))
+                .setItems(Tr.all(new String[]{"30 days", "90 days", "180 days", "1 year"}), (d, which) -> {
                     long cutoff = System.currentTimeMillis() - days[which] * 86400000L;
                     SessionStore st = new SessionStore(this);
                     List<File> old = new ArrayList<>();
                     for (File f : st.history()) if (startOf(f) < cutoff) old.add(f);
-                    if (old.isEmpty()) { Toast.makeText(this, "Nothing older than that", Toast.LENGTH_LONG).show(); return; }
+                    if (old.isEmpty()) { Toast.makeText(this, Tr.t("Nothing older than that"), Toast.LENGTH_LONG).show(); return; }
                     new AlertDialog.Builder(this)
-                            .setMessage("Delete " + old.size() + " trips? This cannot be undone. Export them first if you need them.")
-                            .setPositiveButton("Delete", (d2, w2) -> { for (File f : old) st.delete(f); refreshStorage(); })
-                            .setNegativeButton("Cancel", null)
+                            .setMessage(Tr.f("Delete %s trips? This cannot be undone. Export them first if you need them.", old.size()))
+                            .setPositiveButton(Tr.t("Delete"), (d2, w2) -> { for (File f : old) st.delete(f); refreshStorage(); })
+                            .setNegativeButton(Tr.t("Cancel"), null)
                             .show();
                 })
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton(Tr.t("Cancel"), null)
                 .show();
     }
 
@@ -223,24 +299,24 @@ public class SettingsActivity extends Activity {
         File[] fs = Exporter.exportsDir(this).listFiles();
         int n = 0;
         if (fs != null) for (File f : fs) if (f.delete()) n++;
-        Toast.makeText(this, n + " export files deleted", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, Tr.f("%s export files deleted", n), Toast.LENGTH_SHORT).show();
         refreshStorage();
     }
 
     // ------------------------------------------------------------ إلغاء التثبيت
     private void confirmUninstall() {
         new AlertDialog.Builder(this)
-                .setTitle("Uninstall New Trip?")
-                .setMessage("The app and all saved trips will be removed from this screen. Export your trips first if you want to keep them.")
-                .setPositiveButton("Uninstall", (d, w) -> {
+                .setTitle(Tr.t("Uninstall New Trip?"))
+                .setMessage(Tr.t("The app and all saved trips will be removed from this screen. Export your trips first if you want to keep them."))
+                .setPositiveButton(Tr.t("Uninstall"), (d, w) -> {
                     try {
                         startActivity(new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + getPackageName())));
                     } catch (Exception e) {
-                        Toast.makeText(this, "This screen has no uninstall dialog. Use system Settings > Apps > New Trip.",
+                        Toast.makeText(this, Tr.t("This screen has no uninstall dialog. Use system Settings > Apps > New Trip."),
                                 Toast.LENGTH_LONG).show();
                     }
                 })
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton(Tr.t("Cancel"), null)
                 .show();
     }
 }

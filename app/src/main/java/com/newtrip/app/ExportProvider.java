@@ -11,7 +11,7 @@ import android.provider.OpenableColumns;
 import java.io.File;
 import java.io.FileNotFoundException;
 
-/** يوفّر ملفات التصدير (PDF / Excel) للتطبيقات الأخرى عند المشاركة، بلا مكتبات خارجية. قراءة فقط ومن مجلد التصدير فقط. */
+/** يوفّر ملفات التصدير (PDF / CSV) للتطبيقات الأخرى عند المشاركة، بلا مكتبات خارجية. قراءة فقط ومن مجلد التصدير فقط. */
 public class ExportProvider extends ContentProvider {
     @Override public boolean onCreate() { return true; }
 
@@ -41,7 +41,7 @@ public class ExportProvider extends ContentProvider {
     @Override public String getType(Uri uri) {
         String n = String.valueOf(uri.getLastPathSegment()).toLowerCase();
         if (n.endsWith(".pdf")) return "application/pdf";
-        if (n.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (n.endsWith(".csv")) return "text/csv";
         return "application/octet-stream";
     }
 

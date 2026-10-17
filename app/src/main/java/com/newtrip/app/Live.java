@@ -40,7 +40,7 @@ public final class Live {
     // للتشخيص
     public volatile long speedCbTs, rpmCbTs, powerCbTs, modeCbTs, fuelCbTs;
     public volatile long fuelCbCount;
-    public volatile String source = "غير متصل";
+    public volatile String source = "Not connected";
     public volatile String realtime = "—";
 
     public static String modeName(Integer m) {

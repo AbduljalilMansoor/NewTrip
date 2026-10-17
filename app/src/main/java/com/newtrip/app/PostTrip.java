@@ -16,7 +16,7 @@ final class PostTrip {
                 TripSession s = SessionStore.read(tripFile);
                 if (s != null) {
                     if (mode == Settings.EXPORT_PDF) Exporter.exportPdf(ctx, s);
-                    else Exporter.exportXlsx(ctx, java.util.Collections.singletonList(s));
+                    else Exporter.exportCsv(ctx, java.util.Collections.singletonList(s));
                 }
             }
         } catch (Throwable t) { Log.e("PostTrip", "export", t); }

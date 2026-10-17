@@ -43,6 +43,8 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private FrameLayout content;
     private boolean showingLive;
+    /** اللغة التي بُنيت بها الواجهة؛ إن تغيّرت (من الإعدادات) نعيد بناء الشاشة. */
+    private boolean shownArabic;
     private TextView updateBtn;
     private Updater.Info pendingUpdate;
 
@@ -90,7 +92,7 @@ public class MainActivity extends Activity {
         header.addView(title);
         TextView ver = Ui.text(this, "  v" + Updater.installedName(this), 15, Ui.MUTED, false);
         header.addView(ver, new LinearLayout.LayoutParams(0, -2, 1f));
-        updateBtn = Ui.text(this, "⟳  تحديث", 18, Ui.MUTED, false);
+        updateBtn = Ui.text(this, "⟳  Update", 18, Ui.MUTED, false);
         updateBtn.setPadding(p, p / 2, p, p / 2);
         updateBtn.setOnClickListener(v -> onUpdateClicked());
         header.addView(updateBtn);
@@ -98,7 +100,7 @@ public class MainActivity extends Activity {
         settings.setPadding(p, p / 2, p, p / 2);
         settings.setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
         header.addView(settings);
-        TextView diag = Ui.text(this, "⚙  تشخيص", 18, Ui.MUTED, false);
+        TextView diag = Ui.text(this, "⚙  Diagnostics", 18, Ui.MUTED, false);
         diag.setPadding(p, p / 2, p, p / 2);
         diag.setOnClickListener(v -> showDiagnostics());
         header.addView(diag);
@@ -110,7 +112,10 @@ public class MainActivity extends Activity {
         root.addView(content, clp);
         setContentView(root);
 
-        if (store.loadActive() != null) TripService.start(this); // استئناف رحلة لم تُنهَ
+        shownArabic = Tr.ar;
+        // استئناف رحلة لم تُنهَ، أو تشغيل مراقبة الرحلات في النمط التلقائي
+        if (store.loadActive() != null || Settings.tripMode(this) == Settings.MODE_AUTO) TripService.start(this);
+        if (Settings.languageNeedsManualChoice(this)) chooseLanguage();
         checkUpdateQuietly();
     }
 
@@ -123,12 +128,12 @@ public class MainActivity extends Activity {
                 if (i != null && i.code > Updater.installedCode(this)) {
                     ui.post(() -> {
                         pendingUpdate = i;
-                        updateBtn.setText("⬆  تحديث متوفر");
+                        updateBtn.setText(Tr.t("⬆  Update available"));
                         updateBtn.setTextColor(Ui.GOOD);
                     });
                     // تحديث تلقائي: فقط إن كان مفعّلاً، ولا توجد رحلة جارية، والصلاحية ممنوحة
                     if (Settings.autoUpdate(this) && !tripActive() && getPackageManager().canRequestPackageInstalls()) {
-                        ui.post(() -> Toast.makeText(this, "Updating New Trip to " + i.tag + "…", Toast.LENGTH_LONG).show());
+                        ui.post(() -> Toast.makeText(this, Tr.f("Updating New Trip to %s…", i.tag), Toast.LENGTH_LONG).show());
                         Updater.downloadAndInstall(this, i, (done, total) -> { });
                     }
                 }
@@ -147,17 +152,16 @@ public class MainActivity extends Activity {
 
     private void onUpdateClicked() {
         if (tripActive()) {
-            message("أنهِ الرحلة الجارية أولاً، ثم حدّث التطبيق.");
+            message(Tr.t("End the current trip first, then update the app."));
             return;
         }
         if (!getPackageManager().canRequestPackageInstalls()) {
             // شاشة السيارة لا تعرض إعداد "تثبيت تطبيقات غير معروفة"، فالصلاحية تُمنح من صفحة التثبيت عبر ADB
-            message("لكي يحدّث التطبيق نفسه يحتاج صلاحية تثبيت التطبيقات، وشاشة السيارة لا تعرض هذا الخيار في الإعدادات.\n\n"
-                    + "ثبّت التطبيق مرة واحدة من صفحة التثبيت بالكمبيوتر (تمنحه الصلاحية تلقائياً):\n"
-                    + Updater.installPage() + "\n\nبعدها يعمل زر «تحديث» دائماً بدون كمبيوتر.");
+            message(Tr.f("To update itself the app needs the install-apps permission, and the car screen does not show this option in Settings.\n\nInstall the app once from the install page on a computer (it grants the permission automatically):\n%s\n\nAfter that the Update button always works without a computer.",
+                    Updater.installPage()));
             return;
         }
-        TextView status = Ui.text(this, "جاري البحث عن تحديث…", 18, Ui.TEXT, false);
+        TextView status = Ui.text(this, "Checking for updates…", 18, Ui.TEXT, false);
         status.setPadding(Ui.dp(this, 24), Ui.dp(this, 20), Ui.dp(this, 24), Ui.dp(this, 20));
         AlertDialog dlg = new AlertDialog.Builder(this).setView(status).setCancelable(false).show();
         new Thread(() -> {
@@ -167,30 +171,29 @@ public class MainActivity extends Activity {
                 ui.post(() -> {
                     dlg.dismiss();
                     if (i == null || i.code <= mine) {
-                        message("لديك آخر نسخة ✅\n\nالنسخة الحالية: v" + Updater.installedName(this));
+                        message(Tr.f("You have the latest version ✅\n\nCurrent version: v%s", Updater.installedName(this)));
                     } else {
                         offerUpdate(i);
                     }
                 });
             } catch (Exception e) {
-                ui.post(() -> { dlg.dismiss(); message("تعذر الاتصال بـ GitHub.\nتأكد من اتصال الشاشة بالإنترنت.\n\n" + e.getMessage()); });
+                ui.post(() -> { dlg.dismiss(); message(Tr.f("Could not reach GitHub.\nMake sure the screen is connected to the internet.\n\n%s", e.getMessage())); });
             }
         }).start();
     }
 
     private void offerUpdate(Updater.Info i) {
-        String notes = i.notes == null || i.notes.trim().isEmpty() ? "" : "\n\nما الجديد:\n" + i.notes.trim();
+        String notes = i.notes == null || i.notes.trim().isEmpty() ? "" : "\n\n" + Tr.t("What's new:") + "\n" + i.notes.trim();
         new AlertDialog.Builder(this)
-                .setTitle("نسخة جديدة متوفرة")
-                .setMessage("النسخة الحالية: v" + Updater.installedName(this)
-                        + "\nالنسخة الجديدة: " + i.tag + notes)
-                .setPositiveButton("تحديث الآن", (d, w) -> install(i))
-                .setNegativeButton("لاحقاً", null)
+                .setTitle(Tr.t("New version available"))
+                .setMessage(Tr.f("Current version: v%s\nNew version: %s", Updater.installedName(this), i.tag) + notes)
+                .setPositiveButton(Tr.t("Update now"), (d, w) -> install(i))
+                .setNegativeButton(Tr.t("Later"), null)
                 .show();
     }
 
     private void install(Updater.Info i) {
-        TextView status = Ui.text(this, "جاري التحميل… 0%", 18, Ui.TEXT, false);
+        TextView status = Ui.text(this, "Downloading… 0%", 18, Ui.TEXT, false);
         status.setPadding(Ui.dp(this, 24), Ui.dp(this, 20), Ui.dp(this, 24), Ui.dp(this, 20));
         AlertDialog dlg = new AlertDialog.Builder(this).setView(status).setCancelable(false).show();
         new Thread(() -> {
@@ -200,27 +203,30 @@ public class MainActivity extends Activity {
                     int pct = total > 0 ? (int) (done * 100 / total) : -1;
                     if (pct != last[0]) {
                         last[0] = pct;
-                        ui.post(() -> status.setText(pct >= 0 ? "جاري التحميل… " + pct + "%"
-                                : "جاري التحميل… " + (done / 1024) + " KB"));
+                        ui.post(() -> status.setText(pct >= 0 ? Tr.f("Downloading… %s%%", pct)
+                                : Tr.f("Downloading… %s KB", done / 1024)));
                     }
                 });
                 ui.post(() -> {
                     dlg.dismiss();
-                    updateBtn.setText("⟳  تحديث");
+                    updateBtn.setText(Tr.t("⟳  Update"));
                     updateBtn.setTextColor(Ui.MUTED);
                 });
             } catch (Exception e) {
-                ui.post(() -> { dlg.dismiss(); message("فشل التحميل:\n" + e.getMessage()); });
+                ui.post(() -> { dlg.dismiss(); message(Tr.f("Download failed:\n%s", e.getMessage())); });
             }
         }).start();
     }
 
     private void message(String m) {
-        new AlertDialog.Builder(this).setMessage(m).setPositiveButton("حسناً", null).show();
+        new AlertDialog.Builder(this).setMessage(m).setPositiveButton(Tr.t("OK"), null).show();
     }
 
     @Override protected void onResume() {
         super.onResume();
+        Settings.applyLanguage(this);
+        if (Tr.ar != shownArabic) { recreate(); return; }       // تغيّرت اللغة من الإعدادات
+        if (Settings.tripMode(this) == Settings.MODE_AUTO) TripService.start(this);
         render();
         ui.post(refresh);
     }
@@ -231,7 +237,18 @@ public class MainActivity extends Activity {
         stopPreview();
     }
 
-    private boolean tripActive() { return TripService.instance != null || store.loadActive() != null; }
+    /** رحلة جارية؟ (في النمط التلقائي الخدمة تعمل بلا رحلة، فلا يكفي وجودها). */
+    private boolean tripActive() {
+        TripService svc = TripService.instance;
+        return (svc != null && svc.session() != null) || store.loadActive() != null;
+    }
+
+    /** قراءات السيارة في الشاشة الرئيسية: من خدمة المراقبة إن كانت تعمل (حتى لا يتزاحم اتصالان)، وإلا من المعاينة. */
+    private Live idleLive() {
+        TripService svc = TripService.instance;
+        if (svc != null) return svc.live();
+        return preview != null ? preview.live : null;
+    }
 
     private void render() {
         boolean live = tripActive();
@@ -246,8 +263,8 @@ public class MainActivity extends Activity {
         final Context app = getApplicationContext();
         new Thread(() -> {
             final boolean over = StorageMonitor.isOver(app);
-            final String msg = "⚠ Trip files use " + StorageMonitor.human(StorageMonitor.usedBytes(app))
-                    + " (limit " + Settings.storageLimitMb(app) + " MB) — tap to manage";
+            final String msg = Tr.f("⚠ Trip files use %s (limit %s MB) — tap to manage",
+                    StorageMonitor.human(StorageMonitor.usedBytes(app)), Settings.storageLimitMb(app));
             ui.post(() -> {
                 if (pStorage == null) return;
                 pStorage.setVisibility(over ? View.VISIBLE : View.GONE);
@@ -269,13 +286,32 @@ public class MainActivity extends Activity {
     // التخطيط من اليمين لليسار: أول عنصر يُضاف يظهر يميناً. الرحلات يميناً، وSTART يساراً جهة السائق.
     private View buildIdle() {
         LinearLayout wrap = Ui.row(this);
+        // الاتجاه حسب لغة التطبيق لا لغة النظام. زر START دائماً جهة السائق (يسار)
+        wrap.setLayoutDirection(Tr.ar ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
         List<TripSession> trips = loadTrips();
 
         LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(0, -1, 1.1f);
-        rlp.setMarginStart(Ui.dp(this, 20));
-        wrap.addView(buildTripsPanel(trips), rlp);
-        wrap.addView(buildStartPanel(), new LinearLayout.LayoutParams(0, -1, 1f));
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(0, -1, 1f);
+        int gap = Ui.dp(this, 10);
+        rlp.setMargins(gap, 0, gap, 0);
+        slp.setMargins(gap, 0, gap, 0);
+        View tripsPanel = buildTripsPanel(trips), startPanel = buildStartPanel();
+        if (Tr.ar) { wrap.addView(tripsPanel, rlp); wrap.addView(startPanel, slp); }    // RTL: الأول يمين
+        else { wrap.addView(startPanel, slp); wrap.addView(tripsPanel, rlp); }          // LTR: الأول يسار
         return wrap;
+    }
+
+    /** اختيار اللغة يدوياً عندما لا تُقرأ لغة السيارة أو لا تكون عربية/إنجليزية. */
+    private void chooseLanguage() {
+        new AlertDialog.Builder(this)
+                .setTitle(Tr.t("Language / اللغة"))
+                .setMessage(Tr.t("The car language could not be detected. Please choose.\nتعذّرت قراءة لغة السيارة، الرجاء الاختيار."))
+                .setItems(new String[]{"English", "العربية"}, (d, which) -> {
+                    Settings.setLanguage(this, which == 0 ? Settings.LANG_EN : Settings.LANG_AR);
+                    recreate();
+                })
+                .setCancelable(false)
+                .show();
     }
 
     /** لوحة START: حالة السيارة الآن (النمط، البطارية، الوقود، المدى) وزر البدء. */
@@ -342,7 +378,7 @@ public class MainActivity extends Activity {
 
     private String socText() {
         String t = TripSession.targetText(prefTarget(), prefTarget());
-        return prefForced() ? "🔋 Forced Power Saving · " + t : "🔋 Smart Power Save";
+        return prefForced() ? Tr.f("🔋 Forced Power Saving · %s", t) : Tr.t("🔋 Smart Power Save");
     }
 
     /** نافذة وضع توفير الطاقة: اختيار يدوي، أو معايرة القراءة من السيارة (HCU_SOCMANAGEFED). */
@@ -358,17 +394,17 @@ public class MainActivity extends Activity {
                 "Calibrate: the car is NOW in Forced",
                 "Reset to defaults (Smart=4, Forced=5)"};
         new AlertDialog.Builder(this)
-                .setTitle("SOC mode   [car socMgr=" + raw + "  target=" + tgt + "  ✓ auto" + "]")
-                .setItems(items, (d, which) -> {
+                .setTitle(Tr.t("SOC mode") + "   [car socMgr=" + raw + "  target=" + tgt + "  ✓ auto" + "]")
+                .setItems(Tr.all(items), (d, which) -> {
                     if (which == 0) applySocMode(false, Float.NaN);
                     else if (which == 1) chooseTarget();
                     else if (which == 4) calibrate(null, null, true);
                     else if (l == null || l.socMgrRaw == null)
-                        android.widget.Toast.makeText(this, "No reading from the car yet", android.widget.Toast.LENGTH_LONG).show();
+                        android.widget.Toast.makeText(this, Tr.t("No reading from the car yet"), android.widget.Toast.LENGTH_LONG).show();
                     else if (which == 2) calibrate(null, l.socMgrRaw, false);
                     else calibrate(l.socMgrRaw, null, false);
                 })
-                .setNegativeButton("إلغاء", null)
+                .setNegativeButton(Tr.t("Cancel"), null)
                 .show();
     }
 
@@ -380,7 +416,7 @@ public class MainActivity extends Activity {
         if (smartRaw != null) e.putInt("socmgr_smart", smartRaw);
         e.apply();
         CarBridge.loadCalibration(this);
-        android.widget.Toast.makeText(this, clear ? "Reset: Smart=4, Forced=5" : "Saved. SOC mode is now read from the car.",
+        android.widget.Toast.makeText(this, clear ? Tr.t("Reset: Smart=4, Forced=5") : Tr.t("Saved. SOC mode is now read from the car."),
                 android.widget.Toast.LENGTH_LONG).show();
     }
 
@@ -393,9 +429,9 @@ public class MainActivity extends Activity {
             if (!Float.isNaN(prefTarget()) && Math.round(prefTarget()) == vals[i]) sel = i;
         }
         new AlertDialog.Builder(this)
-                .setTitle("Target SOC")
+                .setTitle(Tr.t("Target SOC"))
                 .setSingleChoiceItems(labels, sel, (d, which) -> { d.dismiss(); applySocMode(true, vals[which]); })
-                .setNegativeButton("إلغاء", null)
+                .setNegativeButton(Tr.t("Cancel"), null)
                 .show();
     }
 
@@ -443,14 +479,14 @@ public class MainActivity extends Activity {
         list.setOrientation(LinearLayout.VERTICAL);
 
         if (!trips.isEmpty()) {
-            list.addView(Ui.text(this, "إحصائياتك  ·  عدد الرحلات " + trips.size(), 20, Ui.TEXT, true));
+            list.addView(Ui.text(this, Tr.f("Your stats  ·  %s trips", trips.size()), 20, Ui.TEXT, true));
             list.addView(statsRow(trips));
         }
         LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(-1, -2);
         hlp.topMargin = Ui.dp(this, trips.isEmpty() ? 0 : 18);
         LinearLayout prevRow = Ui.row(this);
         prevRow.setGravity(Gravity.CENTER_VERTICAL);
-        prevRow.addView(Ui.text(this, "الرحلات السابقة", 20, Ui.TEXT, true), new LinearLayout.LayoutParams(0, -2, 1f));
+        prevRow.addView(Ui.text(this, "Previous trips", 20, Ui.TEXT, true), new LinearLayout.LayoutParams(0, -2, 1f));
         if (!trips.isEmpty()) {
             TextView analyze = Ui.button(this, "📊  Analyze", Ui.EV, v ->
                     startActivity(new Intent(this, AnalyzeActivity.class)));
@@ -467,11 +503,11 @@ public class MainActivity extends Activity {
         }
         list.addView(prevRow, hlp);
         if (trips.isEmpty()) {
-            TextView e = Ui.text(this, "لا توجد رحلات بعد. اضغط START لتبدأ أول رحلة.", 16, Ui.MUTED, false);
+            TextView e = Ui.text(this, "No trips yet. Press START to begin your first trip.", 16, Ui.MUTED, false);
             e.setPadding(0, Ui.dp(this, 12), 0, 0);
             list.addView(e);
         } else {
-            list.addView(Ui.text(this, "اضغط على رحلة لعرض تقريرها، ومطولاً لحذفها", 13, Ui.MUTED, false));
+            list.addView(Ui.text(this, "Tap a trip to see its report, long-press to delete it", 13, Ui.MUTED, false));
         }
 
         String lastDay = null;
@@ -504,10 +540,10 @@ public class MainActivity extends Activity {
             litres += s.totalFuelL();
         }
         LinearLayout r = Ui.row(this);
-        Ui.tile(r, "إجمالي المسافة", Ui.TEXT).setText(Ui.num(km, 1) + " km");
-        Ui.tile(r, "على الكهرباء", Ui.EV).setText(km > 0.01 ? ltr(Ui.num(evKm / km * 100, 0) + "%") : "—");
-        Ui.tile(r, "كهرباء مصروفة", Ui.EV).setText(Ui.num(kwh, 1) + " kWh");
-        Ui.tile(r, "بنزين مصروف", Ui.ENG).setText(Ui.num(litres, 2) + " L");
+        Ui.tile(r, "Total distance", Ui.TEXT).setText(Ui.num(km, 1) + " km");
+        Ui.tile(r, "On electricity", Ui.EV).setText(km > 0.01 ? ltr(Ui.num(evKm / km * 100, 0) + "%") : "—");
+        Ui.tile(r, "Electricity used", Ui.EV).setText(Ui.num(kwh, 1) + " kWh");
+        Ui.tile(r, "Fuel used", Ui.ENG).setText(Ui.num(litres, 2) + " L");
         return r;
     }
 
@@ -542,7 +578,7 @@ public class MainActivity extends Activity {
                 Ui.num(s.evShare(), 0), Ui.num(s.totalKwhOut(), 2), Ui.num(s.totalFuelL(), 2),
                 Ui.dur(s.totalDurMs())), 15, Ui.MUTED, false));
 
-        c.addView(Ui.text(this, ltr(s.driveType() + "  ·  " + s.socModeLabel()
+        c.addView(Ui.text(this, ltr(Tr.t(s.driveType()) + "  ·  " + Tr.t(s.socModeLabel())
                 + ("—".equals(s.targetLabel()) ? "" : "  ·  " + s.targetLabel())
                 + "  ·  " + Ui.num(s.avgSpeedKmh(), 0) + " km/h"), 14, Ui.MUTED, false));
 
@@ -569,25 +605,27 @@ public class MainActivity extends Activity {
         d.setTimeInMillis(wall);
         if (t.get(Calendar.YEAR) == d.get(Calendar.YEAR)) {
             int diff = t.get(Calendar.DAY_OF_YEAR) - d.get(Calendar.DAY_OF_YEAR);
-            if (diff == 0) return "اليوم";
-            if (diff == 1) return "أمس";
+            if (diff == 0) return Tr.t("Today");
+            if (diff == 1) return Tr.t("Yesterday");
         }
         return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date(wall));
     }
 
     private void updateIdle() {
-        if (pStatus == null || preview == null) return;
-        Live l = preview.live;
+        Live l = idleLive();
+        if (pStatus == null || l == null) return;
+        if (preview != null && TripService.instance != null) stopPreview();
         pMode.setText(Live.modeName(l.driveMode));
         boolean hev = isHev(l);
         pKind.setText(hev ? "HEV" : "EV");
         pKind.setBackground(Ui.round(hev ? Ui.ENG : Ui.EV, Ui.dp(this, 10)));
         gauge.setValues(l.socPct, l.fuelPct, l.evRangeKm, fuelRangeKm(l));
-        pStatus.setText("الاتصال: " + l.source);
+        pStatus.setText(Tr.f("Connection: %s", Tr.t(l.source))
+                + (Settings.tripMode(this) == Settings.MODE_AUTO ? "   ·   " + Tr.t("Automatic trips ON") : ""));
     }
 
     private void startPreview() {
-        if (preview != null) return;
+        if (preview != null || TripService.instance != null) return;   // خدمة المراقبة تغني عن المعاينة
         preview = new CarBridge();
         previewThread = new HandlerThread("preview");
         previewThread.start();
@@ -753,9 +791,9 @@ public class MainActivity extends Activity {
         vSource.setText(hevNow ? "HEV" : "EV");
         vSource.setBackground(Ui.round(hevNow ? 0xFF8A5A00 : 0xFF0D5C8C, Ui.dp(this, 10)));
         boolean forced = s.isForced(l);
-        vSoc.setText(forced ? "🔋 Forced · " + TripSession.targetText(s.targetSoc(l), s.targetSoc(l)) : "🔋 Smart Power Save");
+        vSoc.setText(forced ? Tr.f("🔋 Forced · %s", TripSession.targetText(s.targetSoc(l), s.targetSoc(l))) : Tr.t("🔋 Smart Power Save"));
         vElapsed.setText(Ui.clock(System.currentTimeMillis() - s.startWall));
-        vStart.setText("بدأت " + Ui.date(s.startWall));
+        vStart.setText(Tr.f("Started %s", Ui.date(s.startWall)));
 
         // اللوحة
         double max = 1.0; // كم: حتى لا تقفز الأشرطة في أول الرحلة
@@ -776,15 +814,15 @@ public class MainActivity extends Activity {
             }
         }
         TripSession.Cell te = s.total(TripSession.EV), tg = s.total(TripSession.ENG);
-        vEvTotal.setText("Total  " + Ui.num(te.distKm, 1) + " km  ·  " + Ui.num(te.kwhOut, 2) + " kWh");
-        vEngTotal.setText("Total  " + Ui.num(tg.distKm, 1) + " km  ·  " + Ui.num(tg.fuelL, 2) + " L");
+        vEvTotal.setText(Tr.f("Total  %s km  ·  %s kWh", Ui.num(te.distKm, 1), Ui.num(te.kwhOut, 2)));
+        vEngTotal.setText(Tr.f("Total  %s km  ·  %s L", Ui.num(tg.distKm, 1), Ui.num(tg.fuelL, 2)));
         vTotal.setText(Ui.num(te.distKm + tg.distKm, 1) + " km");
         vDonut.setData(te.distKm, tg.distKm);
 
         // القراءات اللحظية
         vSpeed.setText(l.speedKmh == null ? "—" : Ui.num(l.speedKmh, 0) + " km/h");
         Float kw = l.packKw;
-        if (kw == null) vPower.setText("—");
+        if (kw == null) vPower.setText(Tr.t("—"));
         else {
             float out = s.negIsIn ? kw : -kw;
             vPower.setText((out >= 0 ? "" : "+") + Ui.num(Math.abs(out), 1) + " kW");
@@ -805,20 +843,20 @@ public class MainActivity extends Activity {
 
     private void confirmDelete(File f, TripSession s) {
         new AlertDialog.Builder(this)
-                .setTitle("حذف هذه الرحلة؟")
+                .setTitle(Tr.t("Delete this trip?"))
                 .setMessage(Ui.date(s.startWall) + "  →  " + Ui.time(s.endWall) + "\n"
-                        + Ui.num(s.totalDistKm(), 1) + " كم\n\nلا يمكن التراجع عن الحذف.")
-                .setPositiveButton("حذف", (d, w) -> { store.delete(f); render(); })
-                .setNegativeButton("إلغاء", null)
+                        + Tr.f("%s km\n\nThis cannot be undone.", Ui.num(s.totalDistKm(), 1)))
+                .setPositiveButton(Tr.t("Delete"), (d, w) -> { store.delete(f); render(); })
+                .setNegativeButton(Tr.t("Cancel"), null)
                 .show();
     }
 
     private void confirmEnd() {
         new AlertDialog.Builder(this)
-                .setTitle("إنهاء الرحلة؟")
-                .setMessage("سيتم حفظ الرحلة وعرض التقرير.")
-                .setPositiveButton("إنهاء", (d, w) -> endTrip())
-                .setNegativeButton("متابعة", null)
+                .setTitle(Tr.t("End the trip?"))
+                .setMessage(Tr.t("The trip will be saved and its report shown."))
+                .setPositiveButton(Tr.t("End"), (d, w) -> endTrip())
+                .setNegativeButton(Tr.t("Continue"), null)
                 .show();
     }
 
@@ -834,7 +872,7 @@ public class MainActivity extends Activity {
         }
         render();
         if (f != null) openReport(f);
-        else if (had) Toast.makeText(this, "الرحلة أقصر من 0.1 كم، لم تُحفظ", Toast.LENGTH_LONG).show();
+        else if (had) Toast.makeText(this, Tr.t("The trip was shorter than 0.1 km and was not saved"), Toast.LENGTH_LONG).show();
     }
 
     private void openReport(File f) {
@@ -847,51 +885,51 @@ public class MainActivity extends Activity {
         Live l = svc != null ? svc.live() : (preview != null ? preview.live : null);
         long now = SystemClock.elapsedRealtime();
         StringBuilder sb = new StringBuilder();
-        if (l == null) sb.append("لا توجد قراءات بعد.");
+        if (l == null) sb.append(Tr.t("No readings yet."));
         else {
-            sb.append("المصدر: ").append(l.source).append('\n')
-              .append("المستمع اللحظي: ").append(l.realtime).append('\n')
-              .append("آخر إشارة لحظية (ث): سرعة ").append(age(now, l.speedCbTs))
-              .append(" · دورات ").append(age(now, l.rpmCbTs))
-              .append(" · قدرة ").append(age(now, l.powerCbTs))
-              .append(" · نمط ").append(age(now, l.modeCbTs))
-              .append(" · وقود ").append(age(now, l.fuelCbTs)).append('\n')
-              .append("نبضات عداد الوقود: ").append(l.fuelCbCount).append("\n\n")
-              .append("السرعة: ").append(l.speedKmh).append('\n')
-              .append("الدورات RPM: ").append(l.rpm).append("  → ").append(l.engineOn ? "محرك" : "كهرباء").append('\n')
-              .append("نمط القيادة (خام): ").append(l.driveMode).append(" = ").append(Live.modeName(l.driveMode)).append('\n')
-              .append("قدرة البطارية (خام) kW: ").append(l.packKw).append('\n')
-              .append("البطارية %: ").append(l.socPct).append('\n')
-              .append("الوقود %: ").append(l.fuelPct).append("  لتر: ").append(l.fuelLitres).append('\n')
-              .append("العداد كم: ").append(l.odometerKm).append('\n')
-              .append("القير: ").append(l.gear).append('\n')
-              .append("المدى الكهربائي كم (SOC × 100): ").append(l.evRangeKm)
-              .append("   [خام السيارة: ").append(l.evRangeRawKm).append("]").append('\n')
-              .append("مدى العدادات كم: ").append(l.rangeKm).append('\n')
-              .append("وضع التوفير من السيارة: ").append(l.powerSaveForced == null ? "غير معاير (يدوي)" : l.powerSaveForced ? "Forced" : "Smart")
+            sb.append(Tr.t("Source: ")).append(Tr.t(l.source)).append('\n')
+              .append(Tr.t("Realtime listener: ")).append(l.realtime).append('\n')
+              .append(Tr.t("Latest realtime signal (s): speed ")).append(age(now, l.speedCbTs))
+              .append(Tr.t(" · rpm ")).append(age(now, l.rpmCbTs))
+              .append(Tr.t(" · power ")).append(age(now, l.powerCbTs))
+              .append(Tr.t(" · mode ")).append(age(now, l.modeCbTs))
+              .append(Tr.t(" · fuel ")).append(age(now, l.fuelCbTs)).append('\n')
+              .append(Tr.t("Fuel counter pulses: ")).append(l.fuelCbCount).append("\n\n")
+              .append(Tr.t("Speed: ")).append(l.speedKmh).append('\n')
+              .append(Tr.t("RPM: ")).append(l.rpm).append("  → ").append(l.engineOn ? "HEV" : "EV").append('\n')
+              .append(Tr.t("Drive mode (raw): ")).append(l.driveMode).append(" = ").append(Live.modeName(l.driveMode)).append('\n')
+              .append(Tr.t("Battery power (raw) kW: ")).append(l.packKw).append('\n')
+              .append(Tr.t("Battery %: ")).append(l.socPct).append('\n')
+              .append(Tr.t("Fuel %: ")).append(l.fuelPct).append(Tr.t("  litres: ")).append(l.fuelLitres).append('\n')
+              .append(Tr.t("Odometer km: ")).append(l.odometerKm).append('\n')
+              .append(Tr.t("Gear: ")).append(l.gear).append('\n')
+              .append(Tr.t("EV range km (SOC × 100): ")).append(l.evRangeKm)
+              .append(Tr.t("   [car raw: ")).append(l.evRangeRawKm).append("]").append('\n')
+              .append(Tr.t("Cluster range km: ")).append(l.rangeKm).append('\n')
+              .append(Tr.t("Power-save mode from the car: ")).append(l.powerSaveForced == null ? Tr.t("not calibrated (manual)") : l.powerSaveForced ? Tr.t("Forced") : Tr.t("Smart"))
               .append("   [socMgr=").append(l.socMgrRaw).append("  socFed=").append(l.socFedRaw).append("]")
-              .append("   الهدف: ").append(l.forcedSocTarget).append('\n')
+              .append(Tr.t("   target: ")).append(l.forcedSocTarget).append('\n')
               .append("HEV/EV (POWERMODEFED): ").append(l.hevMode == null ? null : l.hevMode == 1 ? "EV" : l.hevMode == 2 ? "HEV" : "M" + l.hevMode).append('\n')
-              .append("حرارة الخارج/المقصورة/البطارية: ").append(l.outsideTempC).append(" / ").append(l.cabinTempC).append(" / ").append(l.packTempMaxC).append('\n')
+              .append(Tr.t("Outside/cabin/battery temperature: ")).append(l.outsideTempC).append(" / ").append(l.cabinTempC).append(" / ").append(l.packTempMaxC).append('\n')
               .append("A/C: ").append(l.acOn).append("   Regen: ").append(l.regenLevel)
-              .append("   متوسط السيارة: ").append(l.carAvgFuel).append(" L/100 , ").append(l.carAvgEnergy).append(" kWh/100").append('\n');
+              .append(Tr.t("   car average: ")).append(l.carAvgFuel).append(" L/100 , ").append(l.carAvgEnergy).append(" kWh/100").append('\n');
         }
         boolean neg = prefs.getBoolean(PREF_NEG_IS_IN, true);
-        sb.append("\nاتجاه قدرة البطارية: ").append(neg ? "السالب = شحن (افتراضي)" : "الموجب = شحن (معكوس)")
-          .append("\nاختبار: أثناء القيادة على الكهرباء يجب أن تظهر \"كهرباء مستهلكة\" تزيد، لا \"المسترجعة\".");
+        sb.append(Tr.t("\nBattery power direction: ")).append(neg ? Tr.t("negative = charging (default)") : Tr.t("positive = charging (reversed)"))
+          .append(Tr.t("\nTest: while driving on electricity the \"used\" electricity should rise, not the \"recovered\"."));
 
         new AlertDialog.Builder(this)
-                .setTitle("تشخيص")
+                .setTitle(Tr.t("Diagnostics"))
                 .setMessage(sb.toString())
-                .setPositiveButton("إغلاق", null)
-                .setNegativeButton("إشارات SOC", (d, w) -> {
+                .setPositiveButton(Tr.t("Close"), null)
+                .setNegativeButton(Tr.t("SOC signals"), (d, w) -> {
                     CarBridge b = svc != null ? null : preview;
-                    String dump = svc != null ? "أثناء الرحلة: افتح التشخيص من الشاشة الرئيسية بعد إنهائها."
-                            : (b == null ? "لا يوجد اتصال" : b.dumpSocSignals());
-                    new AlertDialog.Builder(this).setTitle("إشارات SOC / وضع التوفير")
-                            .setMessage(dump).setPositiveButton("إغلاق", null).show();
+                    String dump = svc != null ? Tr.t("During a trip: open Diagnostics from the home screen after ending it.")
+                            : (b == null ? Tr.t("No connection") : b.dumpSocSignals());
+                    new AlertDialog.Builder(this).setTitle(Tr.t("SOC / power-save signals"))
+                            .setMessage(dump).setPositiveButton(Tr.t("Close"), null).show();
                 })
-                .setNeutralButton("عكس اتجاه البطارية", (d, w) -> {
+                .setNeutralButton(Tr.t("Reverse battery direction"), (d, w) -> {
                     boolean nv = !prefs.getBoolean(PREF_NEG_IS_IN, true);
                     prefs.edit().putBoolean(PREF_NEG_IS_IN, nv).apply();
                     TripService s2 = TripService.instance;

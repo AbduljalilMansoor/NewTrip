@@ -132,7 +132,7 @@ public final class CarBridge {
             }
         }
         String src = al != null && propMgr != null ? "Autolink + VHAL"
-                : al != null ? "Autolink" : propMgr != null ? "VHAL" : "غير متصل";
+                : al != null ? "Autolink" : propMgr != null ? "VHAL" : "Not connected";
         if (cluster != null) src += " + Cluster";
         if (chery != null) src += " + Chery";
         live.source = src;
@@ -152,7 +152,7 @@ public final class CarBridge {
                 try {
                     add2.invoke(al, l, ids);
                     listener = l;
-                    live.realtime = "مفعّل (" + ids.size() + " إشارات)";
+                    live.realtime = Tr.f("Active (%s signals)", ids.size());
                 } catch (Throwable t) {
                     Log.w(TAG, "narrow register failed: " + t);
                 }
@@ -160,11 +160,11 @@ public final class CarBridge {
             if (listener == null && add1 != null) {
                 add1.invoke(al, l);
                 listener = l;
-                live.realtime = "مفعّل (كل الإشارات)";
+                live.realtime = Tr.t("Active (all signals)");
             }
-            if (listener == null) live.realtime = "غير مدعوم";
+            if (listener == null) live.realtime = Tr.t("Not supported");
         } catch (Throwable t) {
-            live.realtime = "فشل: " + t.getClass().getSimpleName();
+            live.realtime = Tr.f("Failed: %s", t.getClass().getSimpleName());
             Log.w(TAG, "realtime listener unavailable", t);
         }
     }
@@ -372,7 +372,7 @@ public final class CarBridge {
     /** للتشخيص: كل قراءات Autolink التي يبدو اسمها متعلقاً بالبطارية/وضع التوفير، مع قيمتها الآن. */
     public String dumpSocSignals() {
         Object car = al;
-        if (car == null) return "Autolink غير متصل";
+        if (car == null) return Tr.t("Autolink not connected");
         StringBuilder sb = new StringBuilder();
         java.util.TreeSet<String> names = new java.util.TreeSet<>();
         for (Method m : car.getClass().getMethods()) {
@@ -388,7 +388,7 @@ public final class CarBridge {
             Float v = al(n);
             sb.append(n).append(" = ").append(v).append('\n');
         }
-        return names.isEmpty() ? "لا توجد إشارات مطابقة" : sb.toString();
+        return names.isEmpty() ? Tr.t("No matching signals") : sb.toString();
     }
 
     // ================= أدوات =================

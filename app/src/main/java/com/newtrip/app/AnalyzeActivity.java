@@ -79,7 +79,7 @@ public class AnalyzeActivity extends Activity {
         TextView dash = Ui.button(this, "📈  Dashboard", Ui.EV, v -> startActivity(new android.content.Intent(this, DashboardActivity.class)));
         dash.setTextSize(16);
         dash.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 8));
-        TextView xl = Ui.button(this, "📊  Export Excel", Ui.CARD2, v -> exportSelected());
+        TextView xl = Ui.button(this, "📊  Export CSV", Ui.CARD2, v -> exportSelected());
         xl.setTextSize(16);
         xl.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 8));
         LinearLayout.LayoutParams xlp = new LinearLayout.LayoutParams(-2, -2);
@@ -152,13 +152,13 @@ public class AnalyzeActivity extends Activity {
     private void exportSelected() {
         final List<TripSession> sel = new ArrayList<>();
         for (int i = 0; i < trips.size(); i++) if (selected[i]) sel.add(trips.get(i));
-        if (sel.isEmpty()) { android.widget.Toast.makeText(this, "Select one or more trips first", android.widget.Toast.LENGTH_LONG).show(); return; }
+        if (sel.isEmpty()) { android.widget.Toast.makeText(this, Tr.t("Select one or more trips first"), android.widget.Toast.LENGTH_LONG).show(); return; }
         new Thread(() -> {
             try {
-                final File out = Exporter.exportXlsx(this, sel);
-                runOnUiThread(() -> Exporter.offer(this, out, Exporter.MIME_XLSX));
+                final List<File> out = Exporter.exportCsv(this, sel);
+                runOnUiThread(() -> Exporter.offer(this, out, Exporter.MIME_CSV));
             } catch (Exception e) {
-                runOnUiThread(() -> android.widget.Toast.makeText(this, "Export failed: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show());
+                runOnUiThread(() -> android.widget.Toast.makeText(this, Tr.f("Export failed: %s", e.getMessage()), android.widget.Toast.LENGTH_LONG).show());
             }
         }, "export").start();
     }
@@ -196,8 +196,8 @@ public class AnalyzeActivity extends Activity {
             LinearLayout col = new LinearLayout(this);
             col.setOrientation(LinearLayout.VERTICAL);
             col.addView(Ui.text(this, Ui.date(s.startWall), 16, s.hasTiers ? Ui.TEXT : Ui.MUTED, true));
-            String info = Ui.num(s.totalDistKm(), 1) + " km  ·  " + s.driveType() + "  ·  " + s.socModeLabel();
-            col.addView(Ui.text(this, s.hasTiers ? info : info + "  ·  no speed-tier data", 13, Ui.MUTED, false));
+            String info = Ui.num(s.totalDistKm(), 1) + " km  ·  " + Tr.t(s.driveType()) + "  ·  " + Tr.t(s.socModeLabel());
+            col.addView(Ui.text(this, s.hasTiers ? info : info + "  ·  " + Tr.t("no speed-tier data"), 13, Ui.MUTED, false));
             r.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
             r.setOnClickListener(v -> {
                 if (!trips.get(idx).hasTiers) return;     // رحلة قديمة قبل Analyze
@@ -220,9 +220,10 @@ public class AnalyzeActivity extends Activity {
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(-1, -2);
         tlp.topMargin = Ui.dp(this, 10);
         resultHolder.addView(table(sel), tlp);
-        TextView note = Ui.text(this, "Mode = " + MODE_LABELS[modeIdx] + "  ·  " + sel.size()
-                + (sel.size() == 1 ? " trip" : " trips") + "  ·  Speed tiers apply while the engine runs; "
-                + "\"EV only\" = engine off at any speed.", 13, Ui.MUTED, false);
+        TextView note = Ui.text(this, Tr.f(sel.size() == 1
+                ? "Mode = %s  ·  %s trip  ·  Speed tiers apply while the engine runs; \"EV only\" = engine off at any speed."
+                : "Mode = %s  ·  %s trips  ·  Speed tiers apply while the engine runs; \"EV only\" = engine off at any speed.",
+                Tr.t(MODE_LABELS[modeIdx]), sel.size()), 13, Ui.MUTED, false);
         note.setPadding(0, Ui.dp(this, 10), 0, Ui.dp(this, 10));
         resultHolder.addView(note);
     }
@@ -246,8 +247,8 @@ public class AnalyzeActivity extends Activity {
         r.setPadding(pd, pd, pd, pd);
         r.addView(Ui.text(this, "Battery level:", 18, Ui.MUTED, true));
         TextView t = Ui.text(this, single
-                ? "  @start = " + start + "     @end = " + end
-                : "  Avg @start = " + start + "     Avg @end = " + end + "   (" + sel.size() + " trips)",
+                ? Tr.f("  @start = %s     @end = %s", start, end)
+                : Tr.f("  Avg @start = %s     Avg @end = %s   (%s trips)", start, end, sel.size()),
                 20, Ui.EV, true);
         r.addView(t);
         return r;

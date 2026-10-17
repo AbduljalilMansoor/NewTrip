@@ -97,12 +97,12 @@ final class CombinedGauge extends View {
         txt.setTypeface(Typeface.DEFAULT);
         txt.setColor(Ui.MUTED);
         txt.setTextSize(r * 0.075f);
-        c.drawText("BATTERY", cx - r * 0.50f, cy - r * 0.68f, txt);
-        c.drawText("FUEL", cx + r * 0.50f, cy - r * 0.68f, txt);
+        c.drawText(Tr.t("BATTERY"), cx - r * 0.50f, cy - r * 0.68f, txt);
+        c.drawText(Tr.t("FUEL"), cx + r * 0.50f, cy - r * 0.68f, txt);
 
         // الوسط: المدى الكلي
         txt.setTextSize(r * 0.075f);
-        c.drawText("TOTAL COMBINED RANGE", cx, cy - r * 0.12f, txt);
+        c.drawText(Tr.t("TOTAL COMBINED RANGE"), cx, cy - r * 0.12f, txt);
         boolean both = !Float.isNaN(evKm) && !Float.isNaN(fuelKm);
         txt.setTypeface(Typeface.DEFAULT_BOLD);
         txt.setColor(Ui.TEXT);
@@ -111,7 +111,7 @@ final class CombinedGauge extends View {
         txt.setTypeface(Typeface.DEFAULT);
         txt.setColor(Ui.MUTED);
         txt.setTextSize(r * 0.07f);
-        c.drawText("EST. REMAINING", cx, cy + r * 0.26f, txt);
+        c.drawText(Tr.t("EST. REMAINING"), cx, cy + r * 0.26f, txt);
 
         // مدى الكهرباء ومدى البنزين تحت الوسط
         drawRange(c, "EV Range", evKm, BLUE, cx - r * 0.28f, cy + r * 0.56f, r);
@@ -122,7 +122,7 @@ final class CombinedGauge extends View {
         txt.setTypeface(Typeface.DEFAULT);
         txt.setColor(Ui.MUTED);
         txt.setTextSize(r * 0.07f);
-        c.drawText(label, x, y, txt);
+        c.drawText(Tr.t(label), x, y, txt);
         txt.setTypeface(Typeface.DEFAULT_BOLD);
         txt.setColor(color);
         txt.setTextSize(r * 0.11f);

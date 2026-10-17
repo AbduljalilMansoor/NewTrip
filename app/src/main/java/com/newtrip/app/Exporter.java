@@ -23,16 +23,17 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
-/** تصدير الرحلات إلى Excel أو PDF، ومشاركتها، وحفظ نسخة في مجلد التنزيلات. الملفات تُحفظ في مجلد التصدير الخاص بالتطبيق. */
+/** تصدير الرحلات إلى CSV أو PDF، ومشاركتها، وحفظ نسخة في مجلد التنزيلات. الملفات تُحفظ في مجلد التصدير الخاص بالتطبيق. */
 final class Exporter {
     private Exporter() { }
 
     static final String MIME_PDF = "application/pdf";
-    static final String MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    static final String MIME_CSV = "text/csv";
 
     static File exportsDir(Context c) {
         File d = new File(c.getFilesDir(), "exports");
@@ -44,13 +45,22 @@ final class Exporter {
 
     private static String stamp(long t) { return new SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(new Date(t)); }
 
-    // ------------------------------------------------------------ Excel
-    static File exportXlsx(Context c, List<TripSession> trips) throws IOException {
-        String name = trips.size() == 1 ? "trip_" + stamp(trips.get(0).startWall)
+    // ------------------------------------------------------------ CSV
+    /**
+     * يكتب جداول CSV (ملف لكل جدول: trips ، speed_tiers ، drive_modes ، soc_changes ، windows_30s) ويعيد الملفات.
+     * الجداول الفارغة (عدا trips) تُتخطى. الصف الأول عناوين إنجليزية ثابتة، والعمود الأول Trip ID.
+     */
+    static List<File> exportCsv(Context c, List<TripSession> trips) throws IOException {
+        String prefix = trips.size() == 1 ? "trip_" + stamp(trips.get(0).startWall)
                 : "trips_" + stamp(System.currentTimeMillis()) + "_" + trips.size();
-        File f = new File(exportsDir(c), name + ".xlsx");
-        try (FileOutputStream o = new FileOutputStream(f)) { Xlsx.write(o, ExportData.sheets(trips)); }
-        return f;
+        List<File> out = new ArrayList<>();
+        for (Csv.Table t : ExportData.tables(trips)) {
+            if (!t.name.equals("trips") && !t.hasData()) continue;
+            File f = new File(exportsDir(c), prefix + "_" + t.name + ".csv");
+            try (FileOutputStream o = new FileOutputStream(f)) { Csv.write(o, t); }
+            out.add(f);
+        }
+        return out;
     }
 
     // ------------------------------------------------------------ PDF
@@ -288,35 +298,46 @@ final class Exporter {
     }
 
     // ------------------------------------------------------------ مشاركة وحفظ
+    /** نافذة بعد التصدير لملف واحد. */
+    static void offer(Activity a, File f, String mime) { offer(a, java.util.Collections.singletonList(f), mime); }
+
     /** نافذة بعد التصدير: مشاركة، أو حفظ نسخة في Downloads. */
-    static void offer(Activity a, File f, String mime) {
+    static void offer(Activity a, List<File> files, String mime) {
+        long size = 0;
+        for (File f : files) size += f.length();
+        String names = files.size() == 1 ? files.get(0).getName() : Tr.f("%s files", files.size());
         new AlertDialog.Builder(a)
-                .setTitle("Saved")
-                .setMessage(f.getName() + "  (" + StorageMonitor.human(f.length()) + ")\n\nShare it or save a copy to the Downloads folder.")
-                .setPositiveButton("Share", (d, w) -> share(a, f, mime))
-                .setNeutralButton("Save to Downloads", (d, w) -> {
-                    String where = saveToDownloads(a, f, mime);
-                    android.widget.Toast.makeText(a, where == null ? "Could not save a copy" : "Saved: " + where,
+                .setTitle(Tr.t("Saved"))
+                .setMessage(names + "  (" + StorageMonitor.human(size) + ")\n\n" + Tr.t("Share it or save a copy to the Downloads folder."))
+                .setPositiveButton(Tr.t("Share"), (d, w) -> share(a, files, mime))
+                .setNeutralButton(Tr.t("Save to Downloads"), (d, w) -> {
+                    String where = null;
+                    for (File f : files) where = saveToDownloads(a, f, mime);
+                    android.widget.Toast.makeText(a, where == null ? Tr.t("Could not save a copy") : Tr.f("Saved: %s", files.size() == 1 ? where : "Downloads/NewTrip"),
                             android.widget.Toast.LENGTH_LONG).show();
                 })
-                .setNegativeButton("Close", null)
+                .setNegativeButton(Tr.t("Close"), null)
                 .show();
     }
 
-    static void share(Context c, File f, String mime) {
-        Uri uri = new Uri.Builder().scheme("content").authority(authority(c)).appendPath(f.getName()).build();
-        Intent i = new Intent(Intent.ACTION_SEND);
+    static void share(Context c, File f, String mime) { share(c, java.util.Collections.singletonList(f), mime); }
+
+    static void share(Context c, List<File> files, String mime) {
+        ArrayList<Uri> uris = new ArrayList<>();
+        for (File f : files) uris.add(new Uri.Builder().scheme("content").authority(authority(c)).appendPath(f.getName()).build());
+        Intent i = new Intent(files.size() > 1 ? Intent.ACTION_SEND_MULTIPLE : Intent.ACTION_SEND);
         i.setType(mime);
-        i.putExtra(Intent.EXTRA_STREAM, uri);
-        i.putExtra(Intent.EXTRA_SUBJECT, "New Trip - " + f.getName());
+        if (files.size() > 1) i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+        else i.putExtra(Intent.EXTRA_STREAM, uris.get(0));
+        i.putExtra(Intent.EXTRA_SUBJECT, "New Trip - " + files.get(0).getName());
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        Intent chooser = Intent.createChooser(i, "Share trip");
+        Intent chooser = Intent.createChooser(i, Tr.t("Share trip"));
         chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         if (!(c instanceof Activity)) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
             c.startActivity(chooser);
         } catch (Exception e) {
-            android.widget.Toast.makeText(c, "No app available to share this file", android.widget.Toast.LENGTH_LONG).show();
+            android.widget.Toast.makeText(c, Tr.t("No app available to share this file"), android.widget.Toast.LENGTH_LONG).show();
         }
     }
 

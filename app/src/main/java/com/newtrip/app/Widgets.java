@@ -19,7 +19,7 @@ final class Widgets {
 
     static Spinner spinner(Context c, String[] items, int sel, Pick cb) {
         final Spinner sp = new Spinner(c, Spinner.MODE_DROPDOWN);
-        ArrayAdapter<String> ad = new ArrayAdapter<String>(c, android.R.layout.simple_spinner_item, items) {
+        ArrayAdapter<String> ad = new ArrayAdapter<String>(c, android.R.layout.simple_spinner_item, Tr.all(items)) {
             @Override public View getView(int pos, View cv, ViewGroup parent) {
                 return style(c, (TextView) super.getView(pos, cv, parent), false);
             }
@@ -72,7 +72,7 @@ final class Widgets {
         pill.setBackground(Ui.round(initial ? Ui.GOOD : Ui.CARD2, Ui.dp(c, 16)));
         pill.setOnClickListener(x -> {
             v[0] = !v[0];
-            pill.setText(v[0] ? "ON" : "OFF");
+            pill.setText(Tr.t(v[0] ? "ON" : "OFF"));
             pill.setBackground(Ui.round(v[0] ? Ui.GOOD : Ui.CARD2, Ui.dp(c, 16)));
             cb.on(v[0]);
         });

@@ -25,18 +25,19 @@ import java.util.List;
  * الفلاتر المنسدلة في الأعلى تؤثر على كل التبويبات.
  */
 public class DashboardActivity extends Activity {
-    private static final int TAB_PHEV = 0, TAB_OVERVIEW = 1, TAB_MAPS = 2;
+    private static final int TAB_SUMMARY = 0, TAB_PHEV = 1, TAB_OVERVIEW = 2, TAB_MAPS = 3;
 
     private DashModel model;
     private LinearLayout bodyHolder, kpiRow;
-    private final LinearLayout[] tabs = new LinearLayout[3];
-    private final TextView[] tabChips = new TextView[3];
-    private final boolean[] dirty = {true, true, true};
-    private int tab = TAB_PHEV;
+    private final LinearLayout[] tabs = new LinearLayout[4];
+    private final TextView[] tabChips = new TextView[4];
+    private final boolean[] dirty = {true, true, true, true};
+    private int tab = TAB_SUMMARY;
+    private LinearLayout summaryBox, phevAdviceBox, overviewAdviceBox, mapsAdviceBox;
     private final List<Spinner> filterSpinners = new ArrayList<>();
 
     // PHEV
-    private LinearLayout phevInsightsBox, tlHolder, forcedTable;
+    private LinearLayout tlHolder, forcedTable;
     private ScatterView startScat;
     private HeatmapView socDistHeat, modeSocHeat, stressHeat;
     private TimelineView timeline;
@@ -45,7 +46,6 @@ public class DashboardActivity extends Activity {
     private List<Integer> tlTrips = new ArrayList<>();
     private int tlChoice = -1;
     // Overview
-    private LinearLayout insightsBox;
     private BarsView bars;
     private int gBy, gMetric = 2;
     // Maps
@@ -78,7 +78,7 @@ public class DashboardActivity extends Activity {
         back.setOnClickListener(v -> finish());
         header.addView(back);
         header.addView(Ui.text(this, "Dashboard", 28, Ui.TEXT, true), new LinearLayout.LayoutParams(0, -2, 1f));
-        TextView export = Ui.button(this, "📊  Export Excel", Ui.CARD2, v -> exportFiltered());
+        TextView export = Ui.button(this, "📊  Export CSV", Ui.CARD2, v -> exportFiltered());
         export.setTextSize(15);
         export.setPadding(Ui.dp(this, 14), Ui.dp(this, 8), Ui.dp(this, 14), Ui.dp(this, 8));
         LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(-2, -2);
@@ -149,12 +149,12 @@ public class DashboardActivity extends Activity {
 
         // شريط التبويبات
         LinearLayout tb = Ui.row(this);
-        String[] names = {"PHEV relations", "Overview", "Maps & scatter"};
-        for (int i = 0; i < 3; i++) {
+        String[] names = {"Summary", "PHEV relations", "Overview", "Maps & scatter"};
+        for (int i = 0; i < 4; i++) {
             final int idx = i;
-            TextView chip = Ui.text(this, names[i], 17, Ui.TEXT, true);
+            TextView chip = Ui.text(this, names[i], 16, Ui.TEXT, true);
             chip.setGravity(Gravity.CENTER);
-            chip.setPadding(Ui.dp(this, 18), Ui.dp(this, 10), Ui.dp(this, 18), Ui.dp(this, 10));
+            chip.setPadding(Ui.dp(this, 10), Ui.dp(this, 10), Ui.dp(this, 10), Ui.dp(this, 10));
             chip.setOnClickListener(v -> switchTab(idx));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1f);
             lp.setMargins(Ui.dp(this, 6), Ui.dp(this, 8), Ui.dp(this, 6), Ui.dp(this, 4));
@@ -163,17 +163,18 @@ public class DashboardActivity extends Activity {
         }
         c.addView(tb);
 
+        tabs[TAB_SUMMARY] = buildSummaryTab();
         tabs[TAB_PHEV] = buildPhevTab();
         tabs[TAB_OVERVIEW] = buildOverviewTab();
         tabs[TAB_MAPS] = buildMapsTab();
         for (LinearLayout t : tabs) c.addView(t);
-        switchTab(TAB_PHEV);
+        switchTab(TAB_SUMMARY);
         refreshKpis();
     }
 
     private void switchTab(int i) {
         tab = i;
-        for (int k = 0; k < 3; k++) {
+        for (int k = 0; k < 4; k++) {
             tabs[k].setVisibility(k == i ? View.VISIBLE : View.GONE);
             tabChips[k].setBackground(Ui.round(k == i ? Ui.EV : Ui.CARD2, Ui.dp(this, 12)));
         }
@@ -183,7 +184,8 @@ public class DashboardActivity extends Activity {
     private void refreshTab(int i) {
         if (!dirty[i]) return;
         dirty[i] = false;
-        if (i == TAB_PHEV) refreshPhev();
+        if (i == TAB_SUMMARY) fillAdvice(summaryBox, Advisor.advise(model, Advisor.OVERALL));
+        else if (i == TAB_PHEV) refreshPhev();
         else if (i == TAB_OVERVIEW) refreshOverview();
         else refreshMaps();
     }
@@ -274,26 +276,45 @@ public class DashboardActivity extends Activity {
         kpi("Avg temp", DashModel.f(k.temp, 0) + " °C", Ui.TEXT);
     }
 
-    private void insightLines(LinearLayout box, List<String> lines) {
+    /** بطاقة النصائح: خلاصات + تشخيص القياسات + ملاحظات التحسين، ثم تنبيه موحّد. */
+    private void fillAdvice(LinearLayout box, Advisor.Advice adv) {
         box.removeAllViews();
-        for (String s : lines) {
-            boolean quiet = s.startsWith("These are") || s.startsWith("ℹ");
-            TextView t = Ui.text(this, s, 16, quiet ? Ui.MUTED : Ui.TEXT, false);
-            t.setPadding(0, Ui.dp(this, 5), 0, 0);
+        adviceSection(box, "Takeaways", Ui.EV, adv.takeaways);
+        if (!adv.diagnoses.isEmpty()) adviceSection(box, "Telemetry diagnoses", Ui.ENG, adv.diagnoses);
+        adviceSection(box, "Optimization notes", Ui.GOOD, adv.actions);
+        TextView d = Ui.text(this, DashModel.DISCLAIMER, 12, Ui.MUTED, false);
+        d.setPadding(0, Ui.dp(this, 10), 0, 0);
+        box.addView(d);
+    }
+
+    private void adviceSection(LinearLayout box, String title, int color, List<String> lines) {
+        TextView h = Ui.text(this, title, 17, color, true);
+        h.setPadding(0, Ui.dp(this, 10), 0, Ui.dp(this, 2));
+        box.addView(h);
+        for (String line : lines) {
+            TextView t = Ui.text(this, "•  " + line, 15, Ui.TEXT, false);
+            t.setPadding(Ui.dp(this, 6), Ui.dp(this, 3), 0, Ui.dp(this, 3));
             box.addView(t);
         }
     }
 
+    private LinearLayout adviceCard(String title, LinearLayout box) {
+        LinearLayout c = Ui.card(this);
+        c.addView(Ui.text(this, title, 20, Ui.TEXT, true));
+        c.addView(box);
+        return c;
+    }
+
     private void exportFiltered() {
-        if (model == null || model.trips.isEmpty()) { Toast.makeText(this, "No trips to export", Toast.LENGTH_LONG).show(); return; }
+        if (model == null || model.trips.isEmpty()) { Toast.makeText(this, Tr.t("No trips to export"), Toast.LENGTH_LONG).show(); return; }
         final List<TripSession> list = new ArrayList<>(model.trips);
-        Toast.makeText(this, "Exporting " + list.size() + " trips…", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, Tr.f("Exporting %s trips…", list.size()), Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
-                final File out = Exporter.exportXlsx(this, list);
-                runOnUiThread(() -> Exporter.offer(this, out, Exporter.MIME_XLSX));
+                final List<File> out = Exporter.exportCsv(this, list);
+                runOnUiThread(() -> Exporter.offer(this, out, Exporter.MIME_CSV));
             } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(this, "Export failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                runOnUiThread(() -> Toast.makeText(this, Tr.f("Export failed: %s", e.getMessage()), Toast.LENGTH_LONG).show());
             }
         }, "export").start();
     }
@@ -305,6 +326,14 @@ public class DashboardActivity extends Activity {
         startActivity(new Intent(this, ReportActivity.class).putExtra(ReportActivity.EXTRA_FILE, s.file.getAbsolutePath()));
     }
 
+    // ============================================================ تبويب 0: Summary
+    private LinearLayout buildSummaryTab() {
+        LinearLayout t = vbox();
+        summaryBox = vbox();
+        t.addView(adviceCard("Overall summary and advice", summaryBox), fullLp());
+        return t;
+    }
+
     // ============================================================ تبويب 1: PHEV relations
     private LinearLayout buildPhevTab() {
         LinearLayout t = vbox();
@@ -313,9 +342,9 @@ public class DashboardActivity extends Activity {
                 "A PHEV drives on the battery as long as it can; the engine only helps when the battery is low, the load is high, or Forced mode is charging it. "
                         + "A fuller battery at the start usually means less fuel. In Forced mode the engine charges up to the target: the bigger the gap between the "
                         + "target and the battery, and the higher the speed or RPM, the more fuel it burns.");
-        phevInsightsBox = vbox();
-        intro.addView(phevInsightsBox);
         t.addView(intro, fullLp());
+        phevAdviceBox = vbox();
+        t.addView(adviceCard("PHEV analysis and advice", phevAdviceBox), fullLp());
 
         // صف 1
         LinearLayout r1 = hrow();
@@ -385,7 +414,7 @@ public class DashboardActivity extends Activity {
     }
 
     private void refreshPhev() {
-        insightLines(phevInsightsBox, model.phevInsights());
+        fillAdvice(phevAdviceBox, Advisor.advise(model, Advisor.PHEV));
 
         DashModel.Scat s = model.startSocScatter();
         startScat.setData(s, "Battery at trip start (%)", "Fuel (L/100km)", true, ref -> {
@@ -394,7 +423,7 @@ public class DashboardActivity extends Activity {
             startOpen.setVisibility(View.VISIBLE);
         });
         startScat.setTrend(model.trend);
-        startTip.setText("Tap a point for the trip details");
+        startTip.setText(Tr.t("Tap a point for the trip details"));
         startOpen.setVisibility(View.GONE);
         startSel = -1;
 
@@ -443,7 +472,7 @@ public class DashboardActivity extends Activity {
             int gapColor = Double.isNaN(gap) ? Ui.MUTED : gap >= 30 ? Ui.BAD : gap >= 15 ? Ui.ENG : Ui.GOOD;
             row.addView(cell(Ui.date(r.p.s.startWall), w[0], Ui.TEXT, true));
             row.addView(cell(DashModel.f(r.p.s.socStart, 0) + "%", w[1], Ui.EV, false));
-            row.addView(cell(DashModel.f(r.tMin, 0) + " min @ " + DashModel.f(r.soc, 0) + "%", w[2], Ui.TEXT, false));
+            row.addView(cell(Tr.f("%s min @ %s%%", DashModel.f(r.tMin, 0), DashModel.f(r.soc, 0)), w[2], Ui.TEXT, false));
             row.addView(cell(DashModel.f(r.target, 0) + "%", w[3], Ui.ENG, true));
             row.addView(cell(Double.isNaN(gap) ? "—" : (gap > 0 ? "−" : "+") + DashModel.f(Math.abs(gap), 0) + "%", w[4], gapColor, true));
             row.addView(cell(DashModel.f(r.p.s.avgRpm(), 0) + " / " + DashModel.f(r.p.s.maxRpm(), 0), w[5], Ui.TEXT, false));
@@ -468,7 +497,7 @@ public class DashboardActivity extends Activity {
         for (int i = 0; i < labels.length; i++) {
             DashModel.Pt p = model.pts.get(tlTrips.get(i));
             boolean forced = p.s.forcedStart() != null;
-            labels[i] = Ui.date(p.s.startWall) + "  ·  " + DashModel.f(p.dist, 0) + " km" + (forced ? "  ·  Forced" : "");
+            labels[i] = Ui.date(p.s.startWall) + "  ·  " + DashModel.f(p.dist, 0) + " km" + (forced ? "  ·  " + Tr.t("Forced") : "");
             if (forced && !found) { sel = i; found = true; }       // الافتراضي: أول رحلة فيها Forced
         }
         tlChoice = sel;
@@ -479,16 +508,14 @@ public class DashboardActivity extends Activity {
     private void showTimeline() {
         if (tlChoice < 0 || tlChoice >= tlTrips.size()) return;
         timeline.setData(model.timeline(tlTrips.get(tlChoice)), tip -> tlTip.setText(tip));
-        tlTip.setText("Tap the chart for values");
+        tlTip.setText(Tr.t("Tap the chart for values"));
     }
 
     // ============================================================ تبويب 2: Overview
     private LinearLayout buildOverviewTab() {
         LinearLayout t = vbox();
-        LinearLayout ic = cardWith("Insights", null);
-        insightsBox = vbox();
-        ic.addView(insightsBox);
-        t.addView(ic, fullLp());
+        overviewAdviceBox = vbox();
+        t.addView(adviceCard("Overview analysis and advice", overviewAdviceBox), fullLp());
 
         LinearLayout barCard = cardWith("Compare by", "Average for each group of driving windows (needs trips recorded with detailed logging).");
         LinearLayout br = Ui.row(this);
@@ -502,7 +529,7 @@ public class DashboardActivity extends Activity {
     }
 
     private void refreshOverview() {
-        insightLines(insightsBox, model.insights());
+        fillAdvice(overviewAdviceBox, Advisor.advise(model, Advisor.OVERVIEW));
         refreshBars();
     }
 
@@ -511,6 +538,8 @@ public class DashboardActivity extends Activity {
     // ============================================================ تبويب 3: Maps & scatter
     private LinearLayout buildMapsTab() {
         LinearLayout t = vbox();
+        mapsAdviceBox = vbox();
+        t.addView(adviceCard("Maps and scatter analysis and advice", mapsAdviceBox), fullLp());
         LinearLayout rowA = hrow();
         LinearLayout heatCard = cardWith("Consumption map", "Speed bands (rows) against acceleration, battery level or outside temperature.");
         LinearLayout hc = Ui.row(this);
@@ -557,6 +586,7 @@ public class DashboardActivity extends Activity {
     }
 
     private void refreshMaps() {
+        fillAdvice(mapsAdviceBox, Advisor.advise(model, Advisor.MAPS));
         refreshHeat();
         refreshTripScatter();
         refreshWinScatter();
@@ -564,7 +594,7 @@ public class DashboardActivity extends Activity {
 
     private void refreshHeat() {
         heat.setHeat(model.heat(mapType, mapMetric), tip -> heatTip.setText(tip));
-        heatTip.setText("Tap a cell for details");
+        heatTip.setText(Tr.t("Tap a cell for details"));
     }
 
     private void refreshTripScatter() {
@@ -574,7 +604,7 @@ public class DashboardActivity extends Activity {
             tripTip.setText(model.tripTip(ref));
             openBtn.setVisibility(View.VISIBLE);
         });
-        tripTip.setText("Tap a point");
+        tripTip.setText(Tr.t("Tap a point"));
         openBtn.setVisibility(View.GONE);
         selTrip = -1;
     }

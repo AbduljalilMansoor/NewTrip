@@ -59,7 +59,7 @@ public class ReportActivity extends Activity {
             TextView pdf = Ui.button(this, "📄  PDF", Ui.CARD2, v -> export(s, true));
             pdf.setTextSize(16);
             pdf.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 8));
-            TextView xls = Ui.button(this, "📊  Excel", Ui.CARD2, v -> export(s, false));
+            TextView xls = Ui.button(this, "📊  CSV", Ui.CARD2, v -> export(s, false));
             xls.setTextSize(16);
             xls.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 8));
             header.addView(pdf, gap);
@@ -69,7 +69,7 @@ public class ReportActivity extends Activity {
         root.addView(header);
 
         if (s == null) {
-            root.addView(Ui.text(this, "تعذر قراءة الرحلة", 18, Ui.BAD, false));
+            root.addView(Ui.text(this, "Could not read this trip", 18, Ui.BAD, false));
             setContentView(root);
             return;
         }
@@ -83,7 +83,7 @@ public class ReportActivity extends Activity {
         body.addView(tripInfo(s));
         body.addView(summary(s));
         body.addView(dashboard(s));
-        TextView hint = Ui.text(this, "اضغط على أي نمط لعرض تفاصيله", 14, Ui.MUTED, false);
+        TextView hint = Ui.text(this, "Tap any mode to see its details", 14, Ui.MUTED, false);
         hint.setGravity(Gravity.CENTER);
         hint.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 18));
         body.addView(hint);
@@ -108,10 +108,10 @@ public class ReportActivity extends Activity {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         LinearLayout r = Ui.row(this);
-        Ui.tile(r, "Mode", Ui.TEXT).setText(s.driveType());
+        Ui.tile(r, "Mode", Ui.TEXT).setText(Tr.t(s.driveType()));
         TextView soc = Ui.tile(r, "SOC mode", Ui.TEXT);
         soc.setTextSize(20);
-        soc.setText(s.socModeLabel());
+        soc.setText(Tr.t(s.socModeLabel()));
         Ui.tile(r, "Target SOC", Ui.TEXT).setText(s.targetLabel());
         Ui.tile(r, "Average speed", Ui.TEXT).setText(Ui.num(s.avgSpeedKmh(), 0) + " km/h");
         box.addView(r);
@@ -134,8 +134,8 @@ public class ReportActivity extends Activity {
 
         float[] fs = s.forcedStart();
         if (fs != null) {
-            TextView f = Ui.text(this, "🔋 Forced charging started " + Ui.num(fs[0] / 60, 0) + " min into the trip at battery "
-                    + Ui.num(fs[1], 0) + "% with target " + Ui.num(fs[2], 0) + "% (gap " + Ui.num(fs[3], 0) + "%)", 16, Ui.ENG, true);
+            TextView f = Ui.text(this, Tr.f("🔋 Forced charging started %s min into the trip at battery %s%% with target %s%% (gap %s%%)",
+                    Ui.num(fs[0] / 60, 0), Ui.num(fs[1], 0), Ui.num(fs[2], 0), Ui.num(fs[3], 0)), 16, Ui.ENG, true);
             f.setPadding(0, Ui.dp(this, 10), 0, 0);
             box.addView(f);
         }
@@ -143,14 +143,14 @@ public class ReportActivity extends Activity {
     }
 
     private void export(TripSession s, boolean pdf) {
-        Toast.makeText(this, "Exporting…", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, Tr.t("Exporting…"), Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
-                File out = pdf ? Exporter.exportPdf(this, s)
-                        : Exporter.exportXlsx(this, java.util.Collections.singletonList(s));
-                runOnUiThread(() -> Exporter.offer(this, out, pdf ? Exporter.MIME_PDF : Exporter.MIME_XLSX));
+                final java.util.List<File> out = pdf ? java.util.Collections.singletonList(Exporter.exportPdf(this, s))
+                        : Exporter.exportCsv(this, java.util.Collections.singletonList(s));
+                runOnUiThread(() -> Exporter.offer(this, out, pdf ? Exporter.MIME_PDF : Exporter.MIME_CSV));
             } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(this, "Export failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                runOnUiThread(() -> Toast.makeText(this, Tr.f("Export failed: %s", e.getMessage()), Toast.LENGTH_LONG).show());
             }
         }, "export").start();
     }
@@ -290,7 +290,7 @@ public class ReportActivity extends Activity {
         TripSession.Cell ev = mode < 0 ? s.total(TripSession.EV) : s.cells[mode][TripSession.EV];
         TripSession.Cell eng = mode < 0 ? s.total(TripSession.ENG) : s.cells[mode][TripSession.ENG];
         double recharged = mode < 0 ? s.totalKwhIn() : ev.kwhIn + eng.kwhIn;
-        String title = (mode < 0 ? "TOTAL" : TripSession.MODE_NAMES[mode].toUpperCase()) + " MODE DETAILS";
+        String title = Tr.f("%s MODE DETAILS", mode < 0 ? Tr.t("TOTAL") : Tr.t(TripSession.MODE_NAMES[mode]).toUpperCase());
 
         LinearLayout v = new LinearLayout(this);
         v.setOrientation(LinearLayout.HORIZONTAL);
@@ -326,7 +326,7 @@ public class ReportActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle(title)
                 .setView(v)
-                .setPositiveButton("إغلاق", null)
+                .setPositiveButton(Tr.t("Close"), null)
                 .show();
     }
 
@@ -432,13 +432,13 @@ public class ReportActivity extends Activity {
         StringBuilder sb = new StringBuilder();
         // الرحلات القديمة سجّلت عداداً لا يتحرك (0.0)، فلا نعرض الفرق إلا إذا تحرك فعلاً
         if (!Float.isNaN(s.odoStart) && !Float.isNaN(s.odoEnd) && s.odoEnd - s.odoStart > 0.05f) {
-            sb.append(String.format(Locale.US, "حسب عداد السيارة: %.1f كم.  ", s.odoEnd - s.odoStart));
+            sb.append(Tr.f("Per the car odometer: %s km.  ", String.format(Locale.US, "%.1f", s.odoEnd - s.odoStart)));
         }
         double engBattery = s.total(TripSession.ENG).kwhOut;
         if (engBattery > 0.01) {
-            sb.append(String.format(Locale.US, "صُرف %.2f kWh من البطارية أثناء عمل المحرك (مساندة هجينة).  ", engBattery));
+            sb.append(Tr.f("%s kWh was drawn from the battery while the engine ran (hybrid assist).  ", String.format(Locale.US, "%.2f", engBattery)));
         }
-        sb.append("Re-charged = الطاقة الداخلة للبطارية في ذلك النمط (استرجاع الفرامل + الشحن من المحرك).");
+        sb.append(Tr.t("Re-charged = energy entering the battery in that mode (regenerative braking + engine charging)."));
         return sb.toString();
     }
 }
